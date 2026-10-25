@@ -45,9 +45,14 @@ export function Traveller({ joinCode }: { joinCode?: string }) {
   async function join(codeToJoin: string) {
     setBusy(true);
     setError('');
-    // Passkey creation and the sponsored Stellar account happen here once wired.
-    await new Promise((r) => setTimeout(r, 900));
-    const ok = ledger.join(codeToJoin);
+    let ok = null;
+    try {
+      ok = await ledger.join(codeToJoin);
+    } catch (err) {
+      setBusy(false);
+      setError(`Stellar did not accept the claim: ${(err as Error).message}`);
+      return;
+    }
     setBusy(false);
     if (!ok) setError('That code does not match an open tax-free sale. Check the receipt and try again.');
     else {
@@ -85,7 +90,7 @@ export function Traveller({ joinCode }: { joinCode?: string }) {
         <div className="grow" />
         <button type="button" className="btn btn--go btn--big btn--block" disabled={busy} onClick={() => join(pending.code)}>
           <FaceIdIcon />
-          {busy ? 'Creating your passkey…' : 'Continue with Face ID'}
+          {busy ? 'Adding it to your account…' : 'Continue with Face ID'}
         </button>
         <p className="fineprint">No seed phrase, no crypto to buy.</p>
       </div>
@@ -113,7 +118,7 @@ export function Traveller({ joinCode }: { joinCode?: string }) {
             <dd className="mono">{fmtPlain(total, cur)}</dd>
           </div>
           <div>
-            <dt>Carimbo fee, flat</dt>
+            <dt>Carimbo fee, 0.5%</dt>
             <dd className="mono">{fmtPlain(fee, cur)}</dd>
           </div>
           <div>

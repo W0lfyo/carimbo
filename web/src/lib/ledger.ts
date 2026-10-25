@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { Activity, ActivityKind, Claim, CurrencyCode, LedgerState } from './types';
-import { FLAT_FEE_EUR_MINOR, convert, fmt, rateBetween, vatFromGross } from './money';
+import { convert, feeOf, fmt, rateBetween, vatFromGross } from './money';
+import { chainAttach, chainConvert, chainOpen, chainReclaim, chainRelease, chainReject, getConfig, type Role } from './stellar';
 import { countryOf, exportDeadline } from './countries';
 
 /**
@@ -9,7 +10,7 @@ import { countryOf, exportDeadline } from './countries';
  * so the interface can be built and demoed before the chain integration lands.
  */
 
-const STORAGE_KEY = 'carimbo.ledger.v2';
+const STORAGE_KEY = 'carimbo.ledger.v3';
 const CHANNEL = 'carimbo.ledger';
 const DAY = 86_400_000;
 
@@ -122,8 +123,16 @@ function commit(next: LedgerState) {
   listeners.forEach((l) => l());
 }
 
-function activity(kind: ActivityKind, label: string, amount: string): Activity {
-  return { id: hex(6), at: Date.now(), kind, label, amount, tx: hex() };
+function activity(kind: ActivityKind, label: string, amount: string, tx?: string): Activity {
+  return { id: hex(6), at: Date.now(), kind, label, amount, tx: tx || hex(), live: !!tx };
+}
+
+const SHOP_ROLE: Record<string, Role> = { 'loja-azul': 'lojaAzul', 'casa-verde': 'casaVerde' };
+const live = () => getConfig() !== null;
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export function isLive(): boolean {
+  return live();
 }
 
 export function useLedger(): LedgerState {
@@ -136,13 +145,28 @@ export function useLedger(): LedgerState {
   );
 }
 
+/**
+ * Every action goes through the Soroban escrow on Stellar Testnet when chain.json is
+ * present, and falls back to a local simulation otherwise (same rules, fake hashes).
+ */
 export const ledger = {
   get: () => state,
 
-  createSale(shopId: string, item: string, paidMinor: number, vatRate: number): Claim {
+  async createSale(shopId: string, item: string, paidMinor: number, vatRate: number): Promise<Claim> {
     const now = Date.now();
     const shop = state.shops.find((s) => s.id === shopId)!;
     const country = countryOf(shop.country);
+    const vat = vatFromGross(paidMinor, vatRate, country.currency);
+    const deadline = exportDeadline(new Date(now), country.exportRule);
+    let chainId: number | undefined;
+    let tx: string | undefined;
+    if (live()) {
+      const res = await chainOpen(SHOP_ROLE[shopId], country.currency, vat, deadline);
+      chainId = res.id;
+      tx = res.hash;
+    } else {
+      await pause(350);
+    }
     const claim: Claim = {
       id: hex(8),
       code: code(),
@@ -151,15 +175,16 @@ export const ledger = {
       currency: country.currency,
       paidCents: paidMinor,
       vatRate,
-      vatCents: vatFromGross(paidMinor, vatRate, country.currency),
+      vatCents: vat,
       createdAt: now,
-      deadline: exportDeadline(new Date(now), country.exportRule),
+      deadline,
       status: 'locked',
+      chainId,
     };
     commit({
       ...state,
       claims: [claim, ...state.claims],
-      activity: [activity('escrow', `${shop.name} locked VAT in escrow`, fmt(claim.vatCents, claim.currency)), ...state.activity],
+      activity: [activity('escrow', `${shop.name} locked VAT in the escrow contract`, fmt(vat, claim.currency), tx), ...state.activity],
     });
     return claim;
   },
@@ -168,15 +193,18 @@ export const ledger = {
     commit({ ...state, shops: state.shops.map((s) => (s.id === shopId ? { ...s, country: countryCode } : s)) });
   },
 
-  /** The traveller scans the shop QR: the claim is attached to their wallet. */
-  join(claimCode: string): Claim | null {
+  /** The traveller scans the shop QR: the claim is attached to their account. */
+  async join(claimCode: string): Promise<Claim | null> {
     const claim = state.claims.find((c) => c.code === claimCode.trim().toUpperCase());
     if (!claim || claim.status !== 'locked') return null;
     if (claim.travellerId === state.traveller.id) return claim;
+    let tx: string | undefined;
+    if (live() && claim.chainId !== undefined) tx = (await chainAttach(claim.chainId)).hash;
+    else await pause(600);
     commit({
       ...state,
       claims: state.claims.map((c) => (c.id === claim.id ? { ...c, travellerId: state.traveller.id } : c)),
-      activity: [activity('join', `${state.traveller.name} added the claim to her wallet`, fmt(claim.vatCents, claim.currency)), ...state.activity],
+      activity: [activity('join', `${state.traveller.name} attached the claim to her account`, fmt(claim.vatCents, claim.currency), tx), ...state.activity],
     });
     return claim;
   },
@@ -185,66 +213,93 @@ export const ledger = {
     commit({ ...state, traveller: { ...state.traveller, currency } });
   },
 
-  /** Customs stamps the whole trip: every locked claim is released, converted and paid out. */
-  clearTrip() {
+  /** Customs stamps the whole trip: every open claim is released, then converted on the DEX. */
+  async clearTrip(): Promise<void> {
     const t = state.traveller;
     const mine = state.claims.filter((c) => c.travellerId === t.id && c.status === 'locked');
     if (mine.length === 0) return;
+    const started = Date.now();
+    const net = (c: Claim) => c.vatCents - feeOf(c.vatCents);
+
+    let releaseTx: string | undefined;
+    const onChain = live() && mine.every((c) => c.chainId !== undefined);
+    if (onChain) releaseTx = (await chainRelease(mine.map((c) => c.chainId!))).hash;
+    else await pause(500);
+
+    // Convert each currency group once on the DEX, then share the result across its claims.
+    const received = new Map<string, number>();
+    const convertTxs: string[] = [];
+    const groups = new Map<CurrencyCode, Claim[]>();
+    mine.forEach((c) => groups.set(c.currency, [...(groups.get(c.currency) ?? []), c]));
+    for (const [cur, list] of groups) {
+      const sent = list.reduce((n, c) => n + net(c), 0);
+      let got: number;
+      if (onChain) {
+        const res = await chainConvert(cur, t.currency, sent);
+        got = res.received;
+        if (res.hash) convertTxs.push(res.hash);
+      } else {
+        got = convert(sent, cur, t.currency);
+      }
+      list.forEach((c) => received.set(c.id, Math.round((got * net(c)) / sent)));
+    }
+
     const now = Date.now();
-    const seconds = 4 + Math.round(Math.random() * 2);
-    // One flat fee per trip, shared across claims in proportion to their VAT (valued in euros).
-    const eurOf = (c: Claim) => convert(c.vatCents, c.currency, 'EUR');
-    const totalEur = mine.reduce((n, c) => n + eurOf(c), 0);
+    const seconds = Math.max(1, Math.round((now - started) / 1000));
     const paid = new Map<string, Claim>();
     for (const c of mine) {
-      const feeEur = Math.round((FLAT_FEE_EUR_MINOR * eurOf(c)) / totalEur);
-      const fee = convert(feeEur, 'EUR', c.currency);
       paid.set(c.id, {
         ...c,
         status: 'refunded',
         payout: {
           currency: t.currency,
           rate: rateBetween(c.currency, t.currency),
-          feeCents: fee,
-          amountMinor: convert(c.vatCents - fee, c.currency, t.currency),
-          seconds,
+          feeCents: feeOf(c.vatCents),
+          amountMinor: received.get(c.id) ?? 0,
+          seconds: onChain ? seconds : 4 + Math.round(Math.random() * 2),
           at: now,
         },
       });
     }
     const amount = [...paid.values()].reduce((n, c) => n + (c.payout?.amountMinor ?? 0), 0);
+    const totalEur = mine.reduce((n, c) => n + convert(c.vatCents, c.currency, 'EUR'), 0);
     commit({
       ...state,
       stampedAt: now,
       claims: state.claims.map((c) => paid.get(c.id) ?? c),
       activity: [
-        activity('convert', `Converted to ${t.currency} and paid ${t.name}`, fmt(amount, t.currency)),
-        activity('clear', `Customs cleared ${mine.length} ${mine.length > 1 ? 'purchases' : 'purchase'} and released escrow`, fmt(totalEur, 'EUR')),
+        activity('convert', `Converted on the Stellar DEX and paid ${t.name} in ${t.currency}`, fmt(amount, t.currency), convertTxs[0]),
+        activity('clear', `Customs signed: escrow released ${mine.length} ${mine.length > 1 ? 'claims' : 'claim'}`, fmt(totalEur, 'EUR'), releaseTx),
         ...state.activity,
       ],
     });
   },
 
-  rejectTrip() {
+  async rejectTrip(): Promise<void> {
     const t = state.traveller;
     const mine = state.claims.filter((c) => c.travellerId === t.id && c.status === 'locked');
     if (mine.length === 0) return;
-    const total = mine.reduce((s, c) => s + convert(c.vatCents, c.currency, 'EUR'), 0);
+    let tx: string | undefined;
+    if (live() && mine.every((c) => c.chainId !== undefined)) tx = (await chainReject(mine.map((c) => c.chainId!))).hash;
+    else await pause(400);
+    const total = mine.reduce((n, c) => n + convert(c.vatCents, c.currency, 'EUR'), 0);
     commit({
       ...state,
       claims: state.claims.map((c) => (mine.includes(c) ? { ...c, status: 'rejected' } : c)),
-      activity: [activity('reject', 'Customs refused the export, VAT returned to the shops', fmt(total, 'EUR')), ...state.activity],
+      activity: [activity('reject', 'Customs refused the export, VAT returned to the shops', fmt(total, 'EUR'), tx), ...state.activity],
     });
   },
 
-  reclaim(claimId: string) {
+  async reclaim(claimId: string): Promise<void> {
     const claim = state.claims.find((c) => c.id === claimId);
     if (!claim || claim.status !== 'locked' || claim.deadline > Date.now()) return;
+    let tx: string | undefined;
+    if (live() && claim.chainId !== undefined) tx = (await chainReclaim(SHOP_ROLE[claim.shopId], claim.chainId)).hash;
     const shop = state.shops.find((s) => s.id === claim.shopId);
     commit({
       ...state,
       claims: state.claims.map((c) => (c.id === claimId ? { ...c, status: 'reclaimed' } : c)),
-      activity: [activity('reclaim', `Deadline passed, ${shop?.name ?? 'shop'} took its VAT back`, fmt(claim.vatCents, claim.currency)), ...state.activity],
+      activity: [activity('reclaim', `Deadline passed, ${shop?.name ?? 'shop'} took its VAT back`, fmt(claim.vatCents, claim.currency), tx), ...state.activity],
     });
   },
 

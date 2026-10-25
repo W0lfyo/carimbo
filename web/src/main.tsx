@@ -1,3 +1,4 @@
+import './polyfills';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@fontsource/instrument-sans/400.css';
@@ -11,8 +12,14 @@ import './styles/components.css';
 import './styles/views.css';
 import { App } from './App';
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+import { loadConfig } from './lib/stellar';
+
+// Read chain.json (or this browser's own deployment) before the first render, so every
+// action knows whether it runs on Stellar Testnet or in simulation.
+loadConfig().finally(() => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+});

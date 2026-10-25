@@ -26,6 +26,8 @@ export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: s
   const detected = detectCountry().code;
   const [rate, setRate] = useState(country.rates[0].rate);
   const [current, setCurrent] = useState<Claim | null>(null);
+  const [locking, setLocking] = useState(false);
+  const [failure, setFailure] = useState('');
 
   // A new country brings its own standard rate.
   useEffect(() => setRate(country.rates[0].rate), [country.code]);
@@ -78,8 +80,14 @@ export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: s
           className="card sale"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!canLock || !cents) return;
-            setCurrent(ledger.createSale(shopId, item.trim(), cents, rate));
+            if (!canLock || !cents || locking) return;
+            setLocking(true);
+            setFailure('');
+            ledger
+              .createSale(shopId, item.trim(), cents, rate)
+              .then(setCurrent)
+              .catch((err: Error) => setFailure(`The escrow did not accept the sale: ${err.message}`))
+              .finally(() => setLocking(false));
           }}
         >
           <h2 className="subtitle">New tax-free sale</h2>
@@ -121,9 +129,10 @@ export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: s
                 ? `Tax-free in ${country.name} needs at least ${fmt(country.minPurchase, cur)} spent in your shop today.`
                 : `Meets ${minText}. For visitors living ${country.zone}: ${ruleText(country.exportRule)}.`}
           </p>
-          <button type="submit" className="btn btn--go btn--block btn--big" disabled={!canLock}>
-            Lock VAT and show QR
+          <button type="submit" className="btn btn--go btn--block btn--big" disabled={!canLock || locking}>
+            {locking ? 'Locking VAT on Stellar…' : 'Lock VAT and show QR'}
           </button>
+          {failure && <p className="field__hint field__hint--error">{failure}</p>}
         </form>
 
         <section className="card handoff" aria-live="polite">
@@ -194,7 +203,7 @@ export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: s
                       </td>
                       <td className="right">
                         {expired && (
-                          <button type="button" className="btn btn--line btn--small" onClick={() => ledger.reclaim(c.id)}>
+                          <button type="button" className="btn btn--line btn--small" onClick={() => void ledger.reclaim(c.id)}>
                             Take VAT back
                           </button>
                         )}

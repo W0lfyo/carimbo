@@ -4,14 +4,15 @@ import { Demo } from './views/Demo';
 import { ShopView } from './views/Shop';
 import { CustomsView } from './views/Customs';
 import { Traveller } from './views/Traveller';
+import { Setup } from './views/Setup';
 
-type Route = { path: 'demo' | 'traveller' | 'shop' | 'customs'; join?: string };
+type Route = { path: 'demo' | 'traveller' | 'shop' | 'customs' | 'setup'; join?: string };
 
 function parse(): Route {
   const raw = location.hash.replace(/^#\/?/, '');
   const [path, query = ''] = raw.split('?');
   const join = new URLSearchParams(query).get('join') ?? undefined;
-  if (path === 'traveller' || path === 'shop' || path === 'customs') return { path, join };
+  if (path === 'traveller' || path === 'shop' || path === 'customs' || path === 'setup') return { path, join };
   return { path: 'demo' };
 }
 
@@ -35,7 +36,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const titles = { demo: 'Carimbo', shop: 'Carimbo for shops', traveller: 'Carimbo', customs: 'Carimbo customs desk' };
+    const titles = { demo: 'Carimbo', shop: 'Carimbo for shops', traveller: 'Carimbo', customs: 'Carimbo customs desk', setup: 'Carimbo testnet setup' };
     document.title = titles[route.path];
   }, [route.path]);
 
@@ -52,6 +53,7 @@ export function App() {
         </nav>
       </header>
       {route.path === 'demo' && <Demo />}
+      {route.path === 'setup' && <Setup />}
       {route.path === 'shop' && (
         <main className="page">
           <ShopView />

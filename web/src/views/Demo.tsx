@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { ledger, useLedger } from '../lib/ledger';
+import { isLive, ledger, useLedger } from '../lib/ledger';
+import { txUrl } from '../lib/stellar';
 import { clock } from '../lib/money';
 import { ShopView } from './Shop';
 import { CustomsView } from './Customs';
@@ -21,11 +22,22 @@ export function Demo() {
   const [stage, setStage] = useState<Stage>('idle');
   const [playing, setPlaying] = useState(false);
   const [joinCode, setJoinCode] = useState<string | undefined>();
+  const [failure, setFailure] = useState('');
   const run = useRef(0);
 
   useEffect(() => () => void (run.current += 1), []);
 
   async function play() {
+    setFailure('');
+    try {
+      await story();
+    } catch (err) {
+      setFailure(`Stellar Testnet did not answer as expected: ${(err as Error).message}. Press Play again to retry.`);
+      setPlaying(false);
+    }
+  }
+
+  async function story() {
     const id = ++run.current;
     const alive = () => run.current === id;
     setPlaying(true);
@@ -34,23 +46,24 @@ export function Demo() {
     setStage('shop');
     await wait(900);
     if (!alive()) return;
-    const a = ledger.createSale('loja-azul', 'Leather bag', 40000, 23);
+    const a = await ledger.createSale('loja-azul', 'Leather bag', 40000, 23);
     setJoinCode(a.code);
     await wait(1600);
     if (!alive()) return;
     setStage('traveller');
     await wait(1400);
     if (!alive()) return;
-    ledger.join(a.code);
-    const b = ledger.createSale('casa-verde', 'Ceramics set', 20000, 23);
-    ledger.join(b.code);
+    await ledger.join(a.code);
+    if (!alive()) return;
+    const b = await ledger.createSale('casa-verde', 'Ceramics set', 20000, 23);
+    await ledger.join(b.code);
     setJoinCode(undefined);
     await wait(2200);
     if (!alive()) return;
     setStage('customs');
     await wait(1800);
     if (!alive()) return;
-    ledger.clearTrip();
+    await ledger.clearTrip();
     setStage('paid');
     setPlaying(false);
   }
@@ -69,7 +82,7 @@ export function Demo() {
     <main className="demo">
       <section className="demo__intro">
         <h1 className="demo__headline">
-          Travellers leave about a quarter of their tax-free refund with middlemen. Carimbo pays all of it, in their own currency, the moment customs clears them.
+          Travellers leave about a quarter of their tax-free refund with middlemen. Carimbo gives back 99.5% of it, in their own currency, the moment customs clears them.
         </h1>
         <p className="demo__source">
           Refund operators keep around a quarter of the reclaimable VAT across the EU.{' '}
@@ -99,6 +112,12 @@ export function Demo() {
         ))}
       </ol>
 
+      {failure && (
+        <p className="notice" role="alert">
+          {failure}
+        </p>
+      )}
+
       <div className="stage">
         <section className={`stage__pane${stage === 'shop' ? ' stage__pane--lit' : ''}`} aria-labelledby="pane-shop">
           <h2 className="stage__label" id="pane-shop">
@@ -127,7 +146,14 @@ export function Demo() {
           <h2 className="subtitle" id="chain-title">
             On-chain activity
           </h2>
-          <span className="chip">Stellar Testnet, simulated until the contract is live</span>
+          {isLive() ? (
+            <span className="chip chip--cleared">
+              <span className="dot" aria-hidden="true" />
+              Live on Stellar Testnet
+            </span>
+          ) : (
+            <span className="chip">Simulated: Testnet contract not configured</span>
+          )}
         </div>
         {s.activity.length === 0 ? (
           <p className="muted">Nothing yet. Play the refund to see every step land on the ledger.</p>
@@ -138,9 +164,15 @@ export function Demo() {
                 <span className="mono muted small">{clock(a.at)}</span>
                 <span>{a.label}</span>
                 <span className="mono strong">{a.amount}</span>
-                <span className="mono muted small chain__tx" title={a.tx}>
-                  {a.tx.slice(0, 6)}…{a.tx.slice(-4)}
-                </span>
+                {a.live ? (
+                  <a className="mono small chain__tx" href={txUrl(a.tx)} target="_blank" rel="noreferrer" title="Open on Stellar Expert">
+                    {a.tx.slice(0, 6)}…{a.tx.slice(-4)}
+                  </a>
+                ) : (
+                  <span className="mono muted small chain__tx" title="Simulated transaction">
+                    {a.tx.slice(0, 6)}…{a.tx.slice(-4)}
+                  </span>
+                )}
               </li>
             ))}
           </ol>

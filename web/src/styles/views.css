@@ -790,3 +790,39 @@
     display: none;
   }
 }
+
+/* ---------- setup ---------- */
+
+.setup-log ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-line {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s4);
+  flex-wrap: wrap;
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+
+.setup-line--ok > span::before {
+  content: '✓ ';
+  color: var(--stamp);
+  font-weight: 700;
+}
+
+.setup-line--err {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.setup-json {
+  min-height: 240px;
+  padding: var(--s3);
+  font-size: 12px;
+  resize: vertical;
+}

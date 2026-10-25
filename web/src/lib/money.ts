@@ -21,8 +21,12 @@ export const CURRENCIES: Record<Code, { name: string; symbol: string; perEur: nu
 /** Currencies a traveller can be refunded in. */
 export const PAYOUT_CURRENCIES: Code[] = ['USD', 'GBP', 'BRL', 'CNY', 'JPY', 'CHF', 'EUR'];
 
-/** Flat fee, set in euros and charged in the shop's currency. */
-export const FLAT_FEE_EUR_MINOR = 50;
+/** Carimbo's fee, taken by the escrow contract on release: 0.5% (refund operators keep around 25%). */
+export const FEE_BPS = 50;
+
+export function feeOf(minor: number): number {
+  return Math.floor((minor * FEE_BPS) / 10_000);
+}
 
 /** VAT included in a price: price × rate / (100 + rate), rounded to the unit the currency shows. */
 export function vatFromGross(grossMinor: number, rate: number, code: Code = 'EUR'): number {

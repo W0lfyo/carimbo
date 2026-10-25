@@ -11,6 +11,8 @@
   "dependencies": {
     "@fontsource/instrument-sans": "5.2.6",
     "@fontsource/martian-mono": "5.2.7",
+    "@stellar/stellar-sdk": "^17.4.0",
+    "buffer": "^6.0.3",
     "qrcode": "1.5.4",
     "react": "18.3.1",
     "react-dom": "18.3.1"

@@ -10,6 +10,20 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
   const [typed, setTyped] = useState('');
   const [opened, setOpened] = useState(false);
   const [inspect, setInspect] = useState(false);
+  const [working, setWorking] = useState<'stamp' | 'refuse' | null>(null);
+  const [failure, setFailure] = useState('');
+
+  async function act(kind: 'stamp' | 'refuse') {
+    setWorking(kind);
+    setFailure('');
+    try {
+      await (kind === 'stamp' ? ledger.clearTrip() : ledger.rejectTrip());
+    } catch (err) {
+      setFailure(`Stellar did not accept the signature: ${(err as Error).message}`);
+    } finally {
+      setWorking(null);
+    }
+  }
 
   const open = s.claims.filter((c) => c.travellerId === t.id && c.status === 'locked');
   // Claims can come from shops in different currencies: the total is shown in the first one's.
@@ -131,23 +145,24 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
               </div>
               {inspect && <p className="notice">Ask to see the items. Stamp once they match the receipts, or refuse.</p>}
               <div className="dossier__actions">
-                <button type="button" className="btn btn--ink btn--big stamp-btn" onClick={() => ledger.clearTrip()}>
+                <button type="button" className="btn btn--ink btn--big stamp-btn" disabled={working !== null} onClick={() => act('stamp')}>
                   <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M9 3h6l-1 7h3a2 2 0 0 1 2 2v3H5v-3a2 2 0 0 1 2-2h3L9 3zM4 19h16" />
                   </svg>
-                  Stamp and release {fmt(total, cur)}
+                  {working === 'stamp' ? 'Signing on Stellar…' : `Stamp and release ${fmt(total, cur)}`}
                 </button>
                 {!compact && (
                   <>
                     <button type="button" className="btn btn--line" onClick={() => setInspect(true)}>
                       Inspect goods
                     </button>
-                    <button type="button" className="btn btn--danger" onClick={() => ledger.rejectTrip()}>
+                    <button type="button" className="btn btn--danger" disabled={working !== null} onClick={() => act('refuse')}>
                       Refuse
                     </button>
                   </>
                 )}
               </div>
+              {failure && <p className="field__hint field__hint--error">{failure}</p>}
               <p className="muted small">Your signature releases the escrow on Stellar. The traveller is paid in her currency within seconds.</p>
             </>
           ) : lastStamp ? (

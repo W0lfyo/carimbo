@@ -30,6 +30,7 @@ export interface Claim {
   status: ClaimStatus;
   travellerId?: string;
   payout?: Payout;
+  chainId?: number; // claim id inside the Soroban escrow contract
 }
 
 export interface Payout {
@@ -62,7 +63,8 @@ export interface Activity {
   kind: ActivityKind;
   label: string;
   amount: string;
-  tx: string; // transaction hash (simulated until Stellar is wired)
+  tx: string; // transaction hash
+  live: boolean; // true when the hash is a real Stellar Testnet transaction
 }
 
 export interface LedgerState {
