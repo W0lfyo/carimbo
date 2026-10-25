@@ -1,5 +1,5 @@
 import type { Claim, Shop, Traveller } from '../lib/types';
-import { CURRENCIES, eur, eurPlain, shortDate } from '../lib/money';
+import { CURRENCIES, fmt, fmtPlain, shortDate } from '../lib/money';
 
 export function JourneyRail({ step }: { step: 0 | 1 | 2 }) {
   const steps = ['Bought', 'Customs', 'Paid'];
@@ -47,10 +47,10 @@ export function BoardingPass({ claim, shop, traveller }: Props) {
         </div>
         <div>
           <dt>Paid</dt>
-          <dd className="mono">{eurPlain(claim.paidCents)}</dd>
+          <dd className="mono">{fmtPlain(claim.paidCents, claim.currency)}</dd>
         </div>
         <div>
-          <dt>Leave the EU by</dt>
+          <dt>Export by</dt>
           <dd>{shortDate(claim.deadline)}</dd>
         </div>
         <div>
@@ -62,7 +62,7 @@ export function BoardingPass({ claim, shop, traveller }: Props) {
       <footer className="pass__stub">
         <div className="pass__amount">
           <span className="muted">{claim.status === 'refunded' ? 'VAT refunded' : 'VAT locked for you'}</span>
-          <span className="mono pass__vat">{eur(claim.vatCents)}</span>
+          <span className="mono pass__vat">{fmt(claim.vatCents, claim.currency)}</span>
         </div>
         <JourneyRail step={step} />
       </footer>

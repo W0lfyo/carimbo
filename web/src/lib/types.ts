@@ -1,4 +1,6 @@
-export type CurrencyCode = 'USD' | 'GBP' | 'BRL' | 'JPY' | 'CNY' | 'CHF';
+import type { Code } from './money';
+
+export type CurrencyCode = Code;
 
 export type ClaimStatus =
   | 'locked' // VAT sits in escrow, waiting for the traveller to leave the EU
@@ -11,6 +13,7 @@ export interface Shop {
   name: string;
   area: string;
   domain: string; // verified via stellar.toml (SEP-1)
+  country: string; // ISO code, drives VAT rates and rules
 }
 
 export interface Claim {
@@ -18,9 +21,10 @@ export interface Claim {
   code: string; // short code printed under the shop QR
   shopId: string;
   item: string;
-  paidCents: number; // VAT included, in euro cents
+  currency: CurrencyCode; // the shop's local currency
+  paidCents: number; // VAT included, minor units (×100) of `currency`
   vatRate: number; // e.g. 23
-  vatCents: number;
+  vatCents: number; // minor units of `currency`
   createdAt: number; // ms
   deadline: number; // ms, end of the 3rd month after the month of purchase
   status: ClaimStatus;
@@ -30,8 +34,8 @@ export interface Claim {
 
 export interface Payout {
   currency: CurrencyCode;
-  rate: number; // 1 EUR = rate × currency
-  feeCents: number;
+  rate: number; // 1 unit of the claim currency = rate × payout currency
+  feeCents: number; // in the claim currency
   amountMinor: number; // in the payout currency, 2 decimals (JPY shown without)
   seconds: number;
   at: number;

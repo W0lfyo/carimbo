@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { Activity, ActivityKind, Claim, CurrencyCode, LedgerState } from './types';
-import { CURRENCIES, FLAT_FEE_CENTS, convert, eur, exportDeadline, money, vatFromGross } from './money';
+import { FLAT_FEE_EUR_MINOR, convert, fmt, rateBetween, vatFromGross } from './money';
+import { countryOf, exportDeadline } from './countries';
 
 /**
  * Simulated ledger. It mirrors what the Soroban escrow does on Stellar Testnet
@@ -8,7 +9,7 @@ import { CURRENCIES, FLAT_FEE_CENTS, convert, eur, exportDeadline, money, vatFro
  * so the interface can be built and demoed before the chain integration lands.
  */
 
-const STORAGE_KEY = 'carimbo.ledger.v1';
+const STORAGE_KEY = 'carimbo.ledger.v2';
 const CHANNEL = 'carimbo.ledger';
 const DAY = 86_400_000;
 
@@ -28,12 +29,13 @@ function code(): string {
 
 function seed(): LedgerState {
   const now = Date.now();
+  const pt = countryOf('PT');
   const june = new Date(new Date(now).getFullYear(), 5, 2, 11, 20).getTime();
   const c1Created = now - 7 * DAY;
   return {
     shops: [
-      { id: 'loja-azul', name: 'Loja Azul', area: 'Chiado, Lisbon', domain: 'lojaazul.pt' },
-      { id: 'casa-verde', name: 'Casa Verde', area: 'Príncipe Real, Lisbon', domain: 'casaverde.pt' },
+      { id: 'loja-azul', name: 'Loja Azul', area: 'Chiado, Lisbon', domain: 'lojaazul.pt', country: 'PT' },
+      { id: 'casa-verde', name: 'Casa Verde', area: 'Príncipe Real, Lisbon', domain: 'casaverde.pt', country: 'PT' },
     ],
     traveller: {
       id: 'maya',
@@ -53,11 +55,12 @@ function seed(): LedgerState {
         code: code(),
         shopId: 'loja-azul',
         item: 'Wool coat',
+        currency: 'EUR',
         paidCents: 24600,
         vatRate: 23,
         vatCents: vatFromGross(24600, 23),
         createdAt: c1Created,
-        deadline: exportDeadline(new Date(c1Created)),
+        deadline: exportDeadline(new Date(c1Created), pt.exportRule),
         status: 'refunded',
         travellerId: 'someone-else',
       },
@@ -66,11 +69,12 @@ function seed(): LedgerState {
         code: code(),
         shopId: 'loja-azul',
         item: 'Silver earrings',
+        currency: 'EUR',
         paidCents: 10000,
         vatRate: 23,
         vatCents: vatFromGross(10000, 23),
         createdAt: june,
-        deadline: exportDeadline(new Date(june)),
+        deadline: exportDeadline(new Date(june), pt.exportRule),
         status: 'locked',
         travellerId: 'someone-else-2',
       },
@@ -135,27 +139,33 @@ export function useLedger(): LedgerState {
 export const ledger = {
   get: () => state,
 
-  createSale(shopId: string, item: string, paidCents: number, vatRate: number): Claim {
+  createSale(shopId: string, item: string, paidMinor: number, vatRate: number): Claim {
     const now = Date.now();
+    const shop = state.shops.find((s) => s.id === shopId)!;
+    const country = countryOf(shop.country);
     const claim: Claim = {
       id: hex(8),
       code: code(),
       shopId,
       item,
-      paidCents,
+      currency: country.currency,
+      paidCents: paidMinor,
       vatRate,
-      vatCents: vatFromGross(paidCents, vatRate),
+      vatCents: vatFromGross(paidMinor, vatRate, country.currency),
       createdAt: now,
-      deadline: exportDeadline(new Date(now)),
+      deadline: exportDeadline(new Date(now), country.exportRule),
       status: 'locked',
     };
-    const shop = state.shops.find((s) => s.id === shopId);
     commit({
       ...state,
       claims: [claim, ...state.claims],
-      activity: [activity('escrow', `${shop?.name ?? 'Shop'} locked VAT in escrow`, eur(claim.vatCents)), ...state.activity],
+      activity: [activity('escrow', `${shop.name} locked VAT in escrow`, fmt(claim.vatCents, claim.currency)), ...state.activity],
     });
     return claim;
+  },
+
+  setShopCountry(shopId: string, countryCode: string) {
+    commit({ ...state, shops: state.shops.map((s) => (s.id === shopId ? { ...s, country: countryCode } : s)) });
   },
 
   /** The traveller scans the shop QR: the claim is attached to their wallet. */
@@ -166,7 +176,7 @@ export const ledger = {
     commit({
       ...state,
       claims: state.claims.map((c) => (c.id === claim.id ? { ...c, travellerId: state.traveller.id } : c)),
-      activity: [activity('join', `${state.traveller.name} added the claim to her wallet`, eur(claim.vatCents)), ...state.activity],
+      activity: [activity('join', `${state.traveller.name} added the claim to her wallet`, fmt(claim.vatCents, claim.currency)), ...state.activity],
     });
     return claim;
   },
@@ -181,33 +191,35 @@ export const ledger = {
     const mine = state.claims.filter((c) => c.travellerId === t.id && c.status === 'locked');
     if (mine.length === 0) return;
     const now = Date.now();
-    const total = mine.reduce((s, c) => s + c.vatCents, 0);
-    const fee = FLAT_FEE_CENTS;
-    const amount = convert(total - fee, t.currency);
-    const share = (c: Claim) => Math.round((amount * c.vatCents) / total);
     const seconds = 4 + Math.round(Math.random() * 2);
+    // One flat fee per trip, shared across claims in proportion to their VAT (valued in euros).
+    const eurOf = (c: Claim) => convert(c.vatCents, c.currency, 'EUR');
+    const totalEur = mine.reduce((n, c) => n + eurOf(c), 0);
+    const paid = new Map<string, Claim>();
+    for (const c of mine) {
+      const feeEur = Math.round((FLAT_FEE_EUR_MINOR * eurOf(c)) / totalEur);
+      const fee = convert(feeEur, 'EUR', c.currency);
+      paid.set(c.id, {
+        ...c,
+        status: 'refunded',
+        payout: {
+          currency: t.currency,
+          rate: rateBetween(c.currency, t.currency),
+          feeCents: fee,
+          amountMinor: convert(c.vatCents - fee, c.currency, t.currency),
+          seconds,
+          at: now,
+        },
+      });
+    }
+    const amount = [...paid.values()].reduce((n, c) => n + (c.payout?.amountMinor ?? 0), 0);
     commit({
       ...state,
       stampedAt: now,
-      claims: state.claims.map((c) =>
-        mine.includes(c)
-          ? {
-              ...c,
-              status: 'refunded',
-              payout: {
-                currency: t.currency,
-                rate: CURRENCIES[t.currency].rate,
-                feeCents: Math.round((fee * c.vatCents) / total),
-                amountMinor: share(c),
-                seconds,
-                at: now,
-              },
-            }
-          : c,
-      ),
+      claims: state.claims.map((c) => paid.get(c.id) ?? c),
       activity: [
-        activity('convert', `Converted EUR to ${t.currency} and paid ${t.name}`, money(amount, t.currency)),
-        activity('clear', `Customs cleared ${mine.length} ${mine.length > 1 ? 'purchases' : 'purchase'} and released escrow`, eur(total)),
+        activity('convert', `Converted to ${t.currency} and paid ${t.name}`, fmt(amount, t.currency)),
+        activity('clear', `Customs cleared ${mine.length} ${mine.length > 1 ? 'purchases' : 'purchase'} and released escrow`, fmt(totalEur, 'EUR')),
         ...state.activity,
       ],
     });
@@ -217,11 +229,11 @@ export const ledger = {
     const t = state.traveller;
     const mine = state.claims.filter((c) => c.travellerId === t.id && c.status === 'locked');
     if (mine.length === 0) return;
-    const total = mine.reduce((s, c) => s + c.vatCents, 0);
+    const total = mine.reduce((s, c) => s + convert(c.vatCents, c.currency, 'EUR'), 0);
     commit({
       ...state,
       claims: state.claims.map((c) => (mine.includes(c) ? { ...c, status: 'rejected' } : c)),
-      activity: [activity('reject', 'Customs refused the export, VAT returned to the shops', eur(total)), ...state.activity],
+      activity: [activity('reject', 'Customs refused the export, VAT returned to the shops', fmt(total, 'EUR')), ...state.activity],
     });
   },
 
@@ -232,7 +244,7 @@ export const ledger = {
     commit({
       ...state,
       claims: state.claims.map((c) => (c.id === claimId ? { ...c, status: 'reclaimed' } : c)),
-      activity: [activity('reclaim', `Deadline passed, ${shop?.name ?? 'shop'} took its VAT back`, eur(claim.vatCents)), ...state.activity],
+      activity: [activity('reclaim', `Deadline passed, ${shop?.name ?? 'shop'} took its VAT back`, fmt(claim.vatCents, claim.currency)), ...state.activity],
     });
   },
 

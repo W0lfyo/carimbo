@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ledger, useLedger } from '../lib/ledger';
-import { MIN_PURCHASE_CENTS, VAT_RATES, eur, parseEuros, shortDate, vatFromGross } from '../lib/money';
+import { CURRENCIES, fmt, parseAmount, shortDate, vatFromGross } from '../lib/money';
+import { COUNTRIES, countryOf, detectCountry, ruleText } from '../lib/countries';
 import type { Claim, ClaimStatus } from '../lib/types';
 import { QR } from '../components/QR';
 
@@ -20,12 +21,19 @@ export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: s
   const shop = s.shops.find((x) => x.id === shopId)!;
   const [amount, setAmount] = useState('400.00');
   const [item, setItem] = useState('Leather bag');
-  const [rate, setRate] = useState(23);
+  const country = countryOf(shop.country);
+  const cur = country.currency;
+  const detected = detectCountry().code;
+  const [rate, setRate] = useState(country.rates[0].rate);
   const [current, setCurrent] = useState<Claim | null>(null);
 
-  const cents = parseEuros(amount);
-  const vat = cents ? vatFromGross(cents, rate) : 0;
-  const tooSmall = cents !== null && cents < MIN_PURCHASE_CENTS;
+  // A new country brings its own standard rate.
+  useEffect(() => setRate(country.rates[0].rate), [country.code]);
+
+  const cents = parseAmount(amount);
+  const vat = cents ? vatFromGross(cents, rate, cur) : 0;
+  const tooSmall = cents !== null && cents < country.minPurchase;
+  const minText = country.minPurchase > 0 ? `the ${fmt(country.minPurchase, cur)} minimum` : 'no minimum purchase'
   const invalid = amount.trim() !== '' && cents === null;
   const canLock = !!cents && !tooSmall && item.trim().length > 0;
 
@@ -51,6 +59,20 @@ export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: s
         </header>
       )}
 
+      {!compact && (
+        <label className="field country">
+          <span className="field__label">Shop location sets the VAT rates, minimum and export window</span>
+          <select className="field__input" value={shop.country} onChange={(e) => ledger.setShopCountry(shopId, e.target.value)}>
+            {COUNTRIES.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name}, {c.currency}
+                {c.code === detected ? ' (detected on this device)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
       <div className="desk__grid">
         <form
           className="card sale"
@@ -62,7 +84,7 @@ export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: s
         >
           <h2 className="subtitle">New tax-free sale</h2>
           <label className="field">
-            <span className="field__label">Paid, VAT included</span>
+            <span className="field__label">Paid, VAT included, in {CURRENCIES[cur].name}</span>
             <input
               className="field__input field__input--amount"
               inputMode="decimal"
@@ -80,7 +102,7 @@ export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: s
             <label className="field">
               <span className="field__label">VAT rate</span>
               <select className="field__input" value={rate} onChange={(e) => setRate(Number(e.target.value))}>
-                {VAT_RATES.map((r) => (
+                {country.rates.map((r) => (
                   <option key={r.rate} value={r.rate}>
                     {r.label}
                   </option>
@@ -90,14 +112,14 @@ export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: s
           </div>
           <div className="sale__total">
             <span>VAT set aside for the traveller</span>
-            <span className="mono sale__vat">{eur(vat)}</span>
+            <span className="mono sale__vat">{fmt(vat, cur)}</span>
           </div>
           <p id="sale-hint" className={`field__hint${invalid || tooSmall ? ' field__hint--error' : ''}`}>
             {invalid
-              ? 'Type an amount like 400 or 400.50.'
+              ? `Type an amount in ${CURRENCIES[cur].name}, like 400 or 400.50.`
               : tooSmall
-                ? 'Tax-free needs at least €50.00 spent in your shop today.'
-                : 'Above the €50 minimum. The traveller has until the end of the third month to leave the EU.'}
+                ? `Tax-free in ${country.name} needs at least ${fmt(country.minPurchase, cur)} spent in your shop today.`
+                : `Meets ${minText}. For visitors living ${country.zone}: ${ruleText(country.exportRule)}.`}
           </p>
           <button type="submit" className="btn btn--go btn--block btn--big" disabled={!canLock}>
             Lock VAT and show QR
@@ -113,7 +135,7 @@ export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: s
               </div>
               <span className="mono handoff__code">{live.code}</span>
               <p className="muted center">
-                {live.travellerId ? 'Added to the traveller’s phone.' : `${eur(live.vatCents)} is in escrow on Stellar, waiting for the traveller to scan.`}
+                {live.travellerId ? 'Added to the traveller’s phone.' : `${fmt(live.vatCents, live.currency)} is in escrow on Stellar, waiting for the traveller to scan.`}
               </p>
               {live.travellerId && (
                 <button type="button" className="btn btn--line btn--small" onClick={() => setCurrent(null)}>
@@ -163,7 +185,7 @@ export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: s
                     <tr key={c.id}>
                       <td>{shortDate(c.createdAt)}</td>
                       <td>{c.item}</td>
-                      <td className="num mono">{eur(c.vatCents)}</td>
+                      <td className="num mono">{fmt(c.vatCents, c.currency)}</td>
                       <td>
                         <span className={`chip chip--${st.tone}`}>
                           <span className="dot" aria-hidden="true" />

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ledger, useLedger } from '../lib/ledger';
-import { CURRENCIES, eur, eurPlain, money } from '../lib/money';
+import { CURRENCIES, PAYOUT_CURRENCIES, convert, fmt, fmtBare, fmtPlain } from '../lib/money';
+import { countryOf } from '../lib/countries';
 import type { CurrencyCode } from '../lib/types';
 import { LogoMark } from '../components/Logo';
 import { BoardingPass } from '../components/BoardingPass';
@@ -75,11 +76,11 @@ export function Traveller({ joinCode }: { joinCode?: string }) {
           </div>
           <div className="receipt__row muted">
             <span>{pending.item}</span>
-            <span className="mono">{eurPlain(pending.paidCents)}</span>
+            <span className="mono">{fmtPlain(pending.paidCents, pending.currency)}</span>
           </div>
           <div className="receipt__tear" aria-hidden="true" />
           <span className="muted">VAT you get back</span>
-          <span className="mono receipt__big">{eur(pending.vatCents)}</span>
+          <span className="mono receipt__big">{fmt(pending.vatCents, pending.currency)}</span>
         </div>
         <div className="grow" />
         <button type="button" className="btn btn--go btn--big btn--block" disabled={busy} onClick={() => join(pending.code)}>
@@ -93,30 +94,32 @@ export function Traveller({ joinCode }: { joinCode?: string }) {
 
   // ---------- 4. refunded ----------
   if (justPaid) {
-    const total = paid.reduce((n, c) => n + c.vatCents, 0);
-    const fee = paid.reduce((n, c) => n + (c.payout?.feeCents ?? 0), 0);
+    const cur = paid[0].currency;
+    const total = paid.reduce((n, c) => n + convert(c.vatCents, c.currency, cur), 0);
+    const fee = paid.reduce((n, c) => n + convert(c.payout?.feeCents ?? 0, c.currency, cur), 0);
+    const country = countryOf(shopOf(paid[0].shopId).country);
     const amount = paid.reduce((n, c) => n + (c.payout?.amountMinor ?? 0), 0);
     const p = paid[0].payout!;
     const at = s.stampedAt ?? p.at;
     const fresh = Date.now() - at < 8000;
     return (
       <div className="phone-screen phone-screen--paper refund" key={at}>
-        <Stamp at={at} strike={fresh} />
+        <Stamp at={at} strike={fresh} text={country.stamp} port={country.airport} />
         <h1 className="headline headline--center">You're paid. Have a good flight.</h1>
-        <SplitFlap value={money(amount, p.currency)} from={eur(total)} play delay={fresh ? 620 : 0} label={`Refunded ${money(amount, p.currency)}`} />
+        <SplitFlap value={fmt(amount, p.currency)} from={fmt(total, cur)} play delay={fresh ? 620 : 0} label={`Refunded ${fmt(amount, p.currency)}`} />
         <dl className="ledger-list">
           <div>
             <dt>VAT reclaimed</dt>
-            <dd className="mono">{eurPlain(total)}</dd>
+            <dd className="mono">{fmtPlain(total, cur)}</dd>
           </div>
           <div>
             <dt>Carimbo fee, flat</dt>
-            <dd className="mono">{eurPlain(fee)}</dd>
+            <dd className="mono">{fmtPlain(fee, cur)}</dd>
           </div>
           <div>
             <dt>Converted at</dt>
             <dd className="mono">
-              1 EUR = {p.rate} {p.currency}
+              1 {cur} = {p.rate} {p.currency}
             </dd>
           </div>
           <div>
@@ -137,7 +140,8 @@ export function Traveller({ joinCode }: { joinCode?: string }) {
 
   // ---------- 3. at the airport ----------
   if (screen === 'airport' && open.length > 0) {
-    const total = open.reduce((n, c) => n + c.vatCents, 0);
+    const cur = open[0].currency;
+    const total = open.reduce((n, c) => n + convert(c.vatCents, c.currency, cur), 0);
     return (
       <div className="phone-screen phone-screen--night">
         <button type="button" className="back" onClick={() => setScreen('trip')}>
@@ -149,8 +153,8 @@ export function Traveller({ joinCode }: { joinCode?: string }) {
         </div>
         <Board
           caption="Your tax-free purchases"
-          rows={open.map((c) => ({ key: c.id, name: shopOf(c.shopId).name.toUpperCase(), amount: (c.vatCents / 100).toFixed(2), status: 'READY' }))}
-          total={eur(total)}
+          rows={open.map((c) => ({ key: c.id, name: shopOf(c.shopId).name.toUpperCase(), amount: fmtBare(c.vatCents, c.currency), status: 'READY' }))}
+          total={fmt(total, cur)}
         />
         <div className="airport-code">
           <QR value={`carimbo:trip:${t.tripCode}`} size={184} label={`Airport code ${t.tripCode}`} />
@@ -179,10 +183,10 @@ export function Traveller({ joinCode }: { joinCode?: string }) {
             <div className="stack-0">
               <strong>{shopOf(c.shopId).name}</strong>
               <span className="muted small">
-                {c.item}, {eurPlain(c.paidCents)}
+                {c.item}, {fmtPlain(c.paidCents, c.currency)}
               </span>
             </div>
-            <span className="mono strong">{eur(c.vatCents)}</span>
+            <span className="mono strong">{fmt(c.vatCents, c.currency)}</span>
           </div>
         ))}
         <CurrencyPicker value={t.currency} />
@@ -230,7 +234,7 @@ export function Traveller({ joinCode }: { joinCode?: string }) {
 }
 
 function CurrencyPicker({ value }: { value: CurrencyCode }) {
-  const options = useMemo(() => Object.entries(CURRENCIES) as [CurrencyCode, (typeof CURRENCIES)[CurrencyCode]][], []);
+  const options = useMemo(() => PAYOUT_CURRENCIES.map((code) => [code, CURRENCIES[code]] as const), []);
   return (
     <label className="field currency">
       <span className="field__label">Refund me in</span>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ledger, useLedger } from '../lib/ledger';
-import { eur, eurPlain, shortDate } from '../lib/money';
+import { convert, fmt, fmtPlain, shortDate } from '../lib/money';
+import { countryOf } from '../lib/countries';
 import { Stamp } from '../components/Stamp';
 
 export function CustomsView({ compact = false }: { compact?: boolean }) {
@@ -11,7 +12,9 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
   const [inspect, setInspect] = useState(false);
 
   const open = s.claims.filter((c) => c.travellerId === t.id && c.status === 'locked');
-  const total = open.reduce((n, c) => n + c.vatCents, 0);
+  // Claims can come from shops in different currencies: the total is shown in the first one's.
+  const cur = open[0]?.currency ?? 'EUR';
+  const total = open.reduce((n, c) => n + convert(c.vatCents, c.currency, cur), 0);
   const shopOf = (id: string) => s.shops.find((x) => x.id === id)!;
   const lastStamp = s.stampedAt && Date.now() - s.stampedAt < 60_000 && open.length === 0 ? s.stampedAt : undefined;
   const showDossier = open.length > 0 && (opened || compact);
@@ -45,7 +48,7 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
                     {t.flight} to {t.toCity}, {t.departs.toLowerCase()}
                   </span>
                 </span>
-                <span className="mono">{eur(total)}</span>
+                <span className="mono">{fmt(total, cur)}</span>
               </button>
             ) : (
               <p className="muted">Nobody is waiting. Travellers appear here when they scan at the e-Tax Free kiosk.</p>
@@ -79,7 +82,7 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
                 <li>
                   <span className="checks__ok" aria-hidden="true">✓</span>
                   <span>
-                    <strong>Lives outside the EU</strong>
+                    <strong>Lives {countryOf(s.shops.find((x) => x.id === open[0]?.shopId)?.country ?? 'PT').zone}</strong>
                     <span className="muted small">Proof from her passport chip. No passport data stored.</span>
                   </span>
                 </li>
@@ -119,8 +122,8 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
                       <tr key={c.id}>
                         <td>{shopOf(c.shopId).name}</td>
                         <td>{c.item}</td>
-                        <td className="num mono">{eurPlain(c.paidCents)}</td>
-                        <td className="num mono">{eur(c.vatCents)}</td>
+                        <td className="num mono">{fmtPlain(c.paidCents, c.currency)}</td>
+                        <td className="num mono">{fmt(c.vatCents, c.currency)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -132,7 +135,7 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
                   <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M9 3h6l-1 7h3a2 2 0 0 1 2 2v3H5v-3a2 2 0 0 1 2-2h3L9 3zM4 19h16" />
                   </svg>
-                  Stamp and release {eur(total)}
+                  Stamp and release {fmt(total, cur)}
                 </button>
                 {!compact && (
                   <>
@@ -149,7 +152,7 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
             </>
           ) : lastStamp ? (
             <div className="cleared">
-              <Stamp at={lastStamp} size={compact ? 132 : 168} />
+              <Stamp at={lastStamp} size={compact ? 132 : 168} text={countryOf(s.shops.find((x) => x.id === s.claims.find((c) => c.travellerId === t.id && c.status === 'refunded')?.shopId)?.country ?? 'PT').stamp} port={countryOf(s.shops.find((x) => x.id === s.claims.find((c) => c.travellerId === t.id && c.status === 'refunded')?.shopId)?.country ?? 'PT').airport} />
               <p className="subtitle center">Cleared. {t.name} has been paid.</p>
             </div>
           ) : (
