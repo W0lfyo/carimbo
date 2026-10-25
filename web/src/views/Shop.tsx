@@ -23,8 +23,9 @@ export function joinUrl(code: string): string {
   return `${location.origin}${location.pathname}#/traveller?join=${code}`;
 }
 
-export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: string; compact?: boolean }) {
+export function ShopView({ initialShop = 'loja-azul', compact = false }: { initialShop?: string; compact?: boolean }) {
   const s = useLedger();
+  const [shopId, setShopId] = useState(initialShop);
   const shop = s.shops.find((x) => x.id === shopId)!;
   const country = countryOf(shop.country);
   const cur = country.currency;
@@ -60,6 +61,28 @@ export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: s
 
   return (
     <div className={`desk${compact ? ' desk--compact' : ''}`}>
+      {!compact && (
+        <nav className="shop-switch" aria-label="Choose the shop">
+          <span className="field__label">You are at the till of</span>
+          <div className="shop-switch__options">
+            {s.shops.map((x) => (
+              <button
+                key={x.id}
+                type="button"
+                className="shop-switch__option"
+                aria-pressed={x.id === shopId}
+                onClick={() => {
+                  setShopId(x.id);
+                  setCurrent(null);
+                }}
+              >
+                {x.name}
+              </button>
+            ))}
+          </div>
+        </nav>
+      )}
+
       {!compact && (
         <header className="desk__head">
           <div className="stack-0">

@@ -99,16 +99,38 @@ export async function submitClassic(source: Keypair, ops: xdr.Operation[], signe
 
 export async function submitClassicTx(source: Keypair, ops: xdr.Operation[], signers: Keypair[] = []): Promise<{ hash: string; tx: Transaction }> {
   const account = await horizon.loadAccount(source.publicKey());
-  const builder = new TransactionBuilder(account, { fee: String(Number(BASE_FEE) * 10), networkPassphrase: PASSPHRASE });
+  const builder = new TransactionBuilder(account, { fee: String(Number(BASE_FEE) * 100), networkPassphrase: PASSPHRASE });
   ops.forEach((op) => builder.addOperation(op));
-  const tx = builder.setTimeout(60).build();
+  const tx = builder.setTimeout(120).build();
   tx.sign(source, ...signers);
+  const hash = Array.from(tx.hash(), (b) => b.toString(16).padStart(2, '0')).join('');
+
+  // The public Testnet Horizon sometimes answers 504 while the transaction still lands.
+  // Before giving up, look the transaction up by hash; resubmitting the same signed
+  // transaction is safe because its sequence number can only be used once.
+  let lastError = '';
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const res = await horizon.submitTransaction(tx);
+      return { hash: res.hash, tx };
+    } catch (e: unknown) {
+      const err = e as { response?: { status?: number; data?: { extras?: { result_codes?: { transaction?: string } } } } };
+      const codes = err.response?.data?.extras?.result_codes;
+      if (codes && codes.transaction !== 'tx_bad_seq') throw new Error(`Transaction failed: ${JSON.stringify(codes)}`);
+      lastError = codes ? JSON.stringify(codes) : (e as Error).message;
+    }
+    await new Promise((r) => setTimeout(r, 2500 * (attempt + 1)));
+    if (await landed(hash)) return { hash, tx };
+  }
+  throw new Error(`Stellar Testnet did not confirm the transaction in time (${lastError})`);
+}
+
+async function landed(hash: string): Promise<boolean> {
   try {
-    const res = await horizon.submitTransaction(tx);
-    return { hash: res.hash, tx };
-  } catch (e: unknown) {
-    const extras = (e as { response?: { data?: { extras?: { result_codes?: unknown } } } }).response?.data?.extras?.result_codes;
-    throw new Error(`Transaction failed: ${JSON.stringify(extras ?? (e as Error).message)}`);
+    const t = await horizon.transactions().transaction(hash).call();
+    return t.successful;
+  } catch {
+    return false;
   }
 }
 

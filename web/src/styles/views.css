@@ -283,6 +283,39 @@
   font-size: var(--step-3);
 }
 
+.shop-switch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  padding-top: var(--s3);
+}
+
+.shop-switch__options {
+  display: inline-flex;
+  padding: 4px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--card) 70%, transparent);
+}
+
+.shop-switch__option {
+  min-height: 36px;
+  padding: 0 var(--s4);
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color var(--t-micro) var(--ease-out), color var(--t-micro) var(--ease-out);
+}
+
+.shop-switch__option[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--paper);
+}
+
 .country {
   max-width: 520px;
 }
