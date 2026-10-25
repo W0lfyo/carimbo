@@ -10,7 +10,7 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
   const s = useLedger();
   const t = s.traveller;
   const [typed, setTyped] = useState('');
-  const [opened, setOpened] = useState(false);
+  const [opened, setOpened] = useState(true);
   const [inspect, setInspect] = useState(false);
   const [working, setWorking] = useState<'stamp' | 'refuse' | null>(null);
   const [failure, setFailure] = useState<{ text: string; tx?: string } | null>(null);
@@ -90,7 +90,10 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
                 <span className="mono">{fmt(total, cur)}</span>
               </button>
             ) : (
-              <p className="muted">Nobody is waiting. Travellers appear here when they scan at the e-Tax Free kiosk.</p>
+              <p className="muted">
+                Nobody is waiting. Travellers appear here as soon as they add a receipt.{' '}
+                <a href="#/shop">Make a sale at a shop</a>
+              </p>
             )}
             <form className="stack-2" onSubmit={lookUp}>
               <label className="field">
@@ -227,6 +230,11 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
             <div className="cleared">
               <Stamp at={lastStamp} size={compact ? 132 : 168} text={countryOf(s.shops.find((x) => x.id === s.claims.find((c) => c.travellerId === t.id && c.status === 'refunded')?.shopId)?.country ?? 'PT').stamp} port={countryOf(s.shops.find((x) => x.id === s.claims.find((c) => c.travellerId === t.id && c.status === 'refunded')?.shopId)?.country ?? 'PT').airport} />
               <p className="subtitle center">Cleared. {t.name} has been paid.</p>
+              {!compact && (
+                <a className="btn btn--line btn--small" href="#/shop">
+                  Next sale at a shop
+                </a>
+              )}
             </div>
           ) : (
             <div className="handoff__empty">

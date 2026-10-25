@@ -265,6 +265,7 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
         <button type="button" className="btn btn--ink btn--block" onClick={() => setScreen('airport')}>
           Show my airport code
         </button>
+        <p className="fineprint">Customs sees your trip already. At the desk, they stamp it and you are paid here.</p>
       </div>
     );
   }
@@ -301,7 +302,9 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
         </button>
       </form>
       <div className="grow" />
-      <p className="fineprint">Works for visitors who live outside the EU.</p>
+      <p className="fineprint">
+        No receipt yet? <a href="#/shop">Make a sale at a shop</a>, then scan its QR with your phone camera.
+      </p>
     </div>
   );
 }

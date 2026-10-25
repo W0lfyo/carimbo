@@ -17,11 +17,11 @@ function parse(): Route {
   return { path: 'demo' };
 }
 
-const LINKS: { path: Route['path']; label: string }[] = [
+const LINKS: { path: Route['path']; label: string; step?: number }[] = [
   { path: 'demo', label: 'Demo' },
-  { path: 'shop', label: 'Shop' },
-  { path: 'traveller', label: 'Traveller' },
-  { path: 'customs', label: 'Customs' },
+  { path: 'shop', label: 'Shop', step: 1 },
+  { path: 'traveller', label: 'Traveller', step: 2 },
+  { path: 'customs', label: 'Customs', step: 3 },
 ];
 
 export function App() {
@@ -50,6 +50,11 @@ export function App() {
         <nav className="topbar__nav" aria-label="Views">
           {LINKS.map((l) => (
             <a key={l.path} className="topbar__link" href={`#/${l.path === 'demo' ? '' : l.path}`} aria-current={route.path === l.path ? 'page' : undefined}>
+              {l.step && (
+                <span className="topbar__step mono" aria-hidden="true">
+                  {l.step}
+                </span>
+              )}
               {l.label}
             </a>
           ))}

@@ -50,7 +50,10 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
   const [shortWindow, setShortWindow] = useState(false);
   const [reclaiming, setReclaiming] = useState<string | null>(null);
   const [reclaimMsg, setReclaimMsg] = useState<{ text: string; tx?: string; error?: boolean } | null>(null);
-  const [current, setCurrent] = useState<Claim | null>(null);
+  // Coming back to the till shows the sale still waiting for the traveller or customs.
+  const [current, setCurrent] = useState<Claim | null>(
+    () => s.claims.find((c) => c.shopId === initialShop && c.status === 'locked' && !compact && Date.now() - c.createdAt < 30 * 60_000) ?? null,
+  );
   const [locking, setLocking] = useState(false);
   const [failure, setFailure] = useState('');
 
@@ -294,10 +297,20 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
                   )}
                 </p>
               )}
-              {live.travellerId && (
-                <button type="button" className="btn btn--line btn--small" onClick={() => setCurrent(null)}>
-                  Next sale
-                </button>
+              {!compact && !live.travellerId && (
+                <a className="textlink" href={joinUrl(live)}>
+                  No phone at hand? Open it on this device
+                </a>
+              )}
+              {!compact && live.travellerId && (
+                <div className="handoff__next">
+                  <a className="btn btn--ink btn--small" href="#/customs">
+                    Go to the customs desk →
+                  </a>
+                  <button type="button" className="btn btn--line btn--small" onClick={() => setCurrent(null)}>
+                    Next sale
+                  </button>
+                </div>
               )}
             </>
           ) : (
