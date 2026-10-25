@@ -280,7 +280,7 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
               <span className="field__hint">
                 {engine === 'native'
                   ? 'Native escrow: the export deadline is enforced by the protocol, refund in one atomic transaction.'
-                  : 'Soroban escrow by Trustless Work: customs approves the milestone and releases it, then the DEX converts.'}
+                  : 'Soroban escrow by Trustless Work, held in USDC: customs approves the milestone and releases it to the traveller.'}
               </span>
             </div>
           )}

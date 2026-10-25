@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Keypair, Operation } from '@stellar/stellar-sdk';
 import { CURRENCIES, type Code } from '../lib/money';
-import { deployTokenContracts } from '../lib/trustless';
+import { prepareTrustless as prepareTw } from '../lib/trustless';
 import { ASSET_CODES, SHOP_ROLES, accountUrl, asset, balances, fund, getConfig, keypair, saveConfig, submitClassic, txUrl, type ChainConfig, type Role } from '../lib/stellar';
 
 const ROLES: Role[] = ['issuer', 'maker', 'platform', 'customs', 'traveller', ...SHOP_ROLES];
@@ -153,8 +153,8 @@ export function Setup() {
       const next = { ...cfg, trustlessWork: twKeyInput.trim() ? { apiKey: twKeyInput.trim() } : cfg.trustlessWork };
       saveConfig(next);
       setResult(next);
-      log({ text: 'Publishing the Stellar Asset Contracts of the local-currency stablecoins…' });
-      await deployTokenContracts(LOCAL, (text) => log({ text }));
+      log({ text: 'USDC trustlines, USDC for the shops, and a USDC market for conversions…' });
+      await prepareTw((text) => log({ text }));
       log({ text: 'Trustless Work ready: shops can choose its escrow at the till.', tone: 'ok' });
     } catch (e) {
       log({ text: (e as Error).message, tone: 'err' });
@@ -203,7 +203,7 @@ export function Setup() {
               <input className="field__input mono" value={twKeyInput} onChange={(e) => setTwKeyInput(e.target.value)} autoComplete="off" spellCheck={false} />
             </label>
             <button type="button" className="btn btn--line" onClick={prepareTrustless} disabled={busy}>
-              Save the key and publish the token contracts
+              Save the key and prepare USDC
             </button>
           </section>
         )}

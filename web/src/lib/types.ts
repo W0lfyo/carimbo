@@ -33,6 +33,7 @@ export interface Claim {
   balanceId?: string; // the claimable balance holding the VAT on Stellar
   escrow?: 'native' | 'trustless'; // which escrow holds the VAT (native claimable balance by default)
   contractId?: string; // the Trustless Work escrow contract, when escrow is 'trustless'
+  escrowUsdc?: number; // USDC minor units held by that escrow
   archived?: boolean; // hidden from the traveller once she starts a new trip
   lines?: { item: string; paidMinor: number; vatRate: number; vatMinor: number }[]; // receipt lines
 }

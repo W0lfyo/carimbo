@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { Activity, ActivityKind, Claim, CurrencyCode, LedgerState } from './types';
 import { convert, feeOf, fmt, rateBetween, vatFromGross } from './money';
-import { ASSET_CODES, balances, chainAttach, chainOpen, chainReclaim, chainRelease, chainReject, chainSetCurrency, claimableInfo, getConfig, type Role } from './stellar';
+import { balances, chainAttach, chainOpen, chainReclaim, chainRelease, chainReject, chainSetCurrency, claimableInfo, getConfig, type Role } from './stellar';
 import { countryOf, exportDeadline } from './countries';
 import { twConvert, twEnabled, twOpen, twRefuse, twRelease } from './trustless';
 
@@ -254,44 +254,37 @@ async function clearTripTrustless(): Promise<void> {
   const mine = state.claims.filter((c) => c.travellerId === t.id && c.status === 'locked' && c.escrow === 'trustless' && c.contractId);
   if (mine.length === 0) return;
   const started = Date.now();
-  const groups = new Map<CurrencyCode, Claim[]>();
-  mine.forEach((c) => groups.set(c.currency, [...(groups.get(c.currency) ?? []), c]));
-  const paid = new Map<string, Claim>();
-  const log: Activity[] = [];
   const traveller = getConfig()!.accounts.traveller.publicKey;
-  for (const [cur, list] of groups) {
-    const held = async () => Math.round(Number((await balances(traveller))[ASSET_CODES[cur]] ?? 0) * 100);
-    const before = await held();
-    let lastRelease = '';
-    for (const c of list) lastRelease = await twRelease(c.contractId!);
-    // Wait for Horizon to see the released euros.
-    let got = 0;
-    for (let i = 0; i < 10 && got <= 0; i++) {
-      got = (await held()) - before;
-      if (got <= 0) await pause(1500);
-    }
-    if (got <= 0) throw new Error('The escrow was released but the payment is not visible yet. Refresh in a moment.');
-    const conv = await twConvert(cur, got, t.currency);
-    const total = list.reduce((n, c) => n + c.vatCents, 0);
-    const rate = Math.round((conv.received / got) * 10_000) / 10_000;
-    let leftOut = conv.received;
-    let leftIn = got;
-    list.forEach((c, i) => {
-      const last = i === list.length - 1;
-      const share = last ? leftIn : Math.round((got * c.vatCents) / total);
-      const out = last ? leftOut : Math.round((conv.received * c.vatCents) / total);
-      leftIn -= share;
-      leftOut -= out;
-      paid.set(c.id, {
-        ...c,
-        status: 'refunded',
-        payout: { currency: t.currency, rate, feeCents: c.vatCents - share, amountMinor: out, seconds: Math.max(1, Math.round((Date.now() - started) / 1000)), at: Date.now(), tx: conv.hash ?? lastRelease },
-      });
-    });
-    log.push(activity('clear', `Customs approved and released ${list.length} Trustless Work ${list.length > 1 ? 'escrows' : 'escrow'}`, fmt(got, cur), lastRelease));
-    if (conv.hash) log.push(activity('convert', `Converted on the Stellar DEX, ${t.name} paid in ${t.currency}`, fmt(conv.received, t.currency), conv.hash));
+  const held = async () => Math.round(Number((await balances(traveller)).USDC ?? 0) * 100);
+  const before = await held();
+  let lastRelease = '';
+  for (const c of mine) lastRelease = await twRelease(c.contractId!);
+  // Wait for Horizon to see the released USDC (escrow amount minus the fees).
+  let got = 0;
+  for (let i = 0; i < 12 && got <= 0; i++) {
+    got = (await held()) - before;
+    if (got <= 0) await pause(1500);
   }
-  commit({ ...state, stampedAt: Date.now(), claims: state.claims.map((c) => paid.get(c.id) ?? c), activity: [...log.reverse(), ...state.activity] });
+  if (got <= 0) throw new Error('The escrow was released but the payment is not visible yet. Refresh in a moment.');
+  const conv = await twConvert(got, t.currency);
+  const total = mine.reduce((n, c) => n + (c.escrowUsdc ?? 0), 0);
+  let leftOut = conv.received;
+  const paid = new Map<string, Claim>();
+  mine.forEach((c, i) => {
+    const part = (c.escrowUsdc ?? 0) / total;
+    const out = i === mine.length - 1 ? leftOut : Math.round(conv.received * part);
+    leftOut -= out;
+    // Fees (Carimbo 0.5% + Trustless Work's own) expressed in the claim's currency.
+    const fee = Math.max(0, Math.round(c.vatCents * (1 - got / total)));
+    paid.set(c.id, {
+      ...c,
+      status: 'refunded',
+      payout: { currency: t.currency, rate: Math.round(((out / (c.vatCents - fee || 1)) * 10_000)) / 10_000, feeCents: fee, amountMinor: out, seconds: Math.max(1, Math.round((Date.now() - started) / 1000)), at: Date.now(), tx: conv.hash ?? lastRelease },
+    });
+  });
+  const log = [activity('clear', `Customs approved and released ${mine.length} Trustless Work ${mine.length > 1 ? 'escrows' : 'escrow'}`, fmt(got, 'USD'), lastRelease)];
+  if (conv.hash) log.unshift(activity('convert', `Converted on the Stellar DEX, ${t.name} paid in ${t.currency}`, fmt(conv.received, t.currency), conv.hash));
+  commit({ ...state, stampedAt: Date.now(), claims: state.claims.map((c) => paid.get(c.id) ?? c), activity: [...log, ...state.activity] });
 }
 
 /**
@@ -314,12 +307,14 @@ export const ledger = {
     const deadline = windowMs ? now + windowMs : exportDeadline(new Date(now), country.exportRule);
     let balanceId: string | undefined;
     let contractId: string | undefined;
+    let escrowUsdc: number | undefined;
     let tx: string | undefined;
     const claimCode = code();
     const trustless = engine === 'trustless' && live() && twEnabled();
     if (trustless) {
       const res = await twOpen(SHOP_ROLE[shopId], country.currency, vat, claimCode);
       contractId = res.contractId;
+      escrowUsdc = res.usdcMinor;
       tx = res.fundTx;
     } else if (live()) {
       const res = await chainOpen(SHOP_ROLE[shopId], country.currency, vat, deadline);
@@ -333,6 +328,7 @@ export const ledger = {
       code: claimCode,
       escrow: trustless ? 'trustless' : 'native',
       contractId,
+      escrowUsdc,
       shopId,
       item,
       currency: country.currency,
@@ -349,7 +345,7 @@ export const ledger = {
       ...state,
       claims: [claim, ...state.claims],
       activity: [
-        activity('escrow', trustless ? `${shop.name} opened and funded a Trustless Work escrow` : `${shop.name} locked the VAT in a claimable balance`, fmt(vat, claim.currency), tx),
+        activity('escrow', trustless ? `${shop.name} opened a Trustless Work escrow and funded it with ${fmt(escrowUsdc ?? 0, 'USD')} USDC` : `${shop.name} locked the VAT in a claimable balance`, fmt(vat, claim.currency), tx),
         ...state.activity,
       ],
     });
@@ -500,7 +496,7 @@ export const ledger = {
     const tw = mine.filter((c) => c.escrow === 'trustless' && c.contractId);
     if (live() && native.length && native.every((c) => c.balanceId))
       tx = (await chainReject(native.map((c) => ({ balanceId: c.balanceId!, currency: c.currency, vatMinor: c.vatCents, shop: SHOP_ROLE[c.shopId] })))).hash;
-    for (const c of tw) tx = await twRefuse(c.contractId!, SHOP_ROLE[c.shopId], c.vatCents);
+    for (const c of tw) tx = await twRefuse(c.contractId!, SHOP_ROLE[c.shopId], c.escrowUsdc ?? 0);
     if (!live()) await pause(400);
     const total = mine.reduce((n, c) => n + convert(c.vatCents, c.currency, 'EUR'), 0);
     commit({
