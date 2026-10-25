@@ -154,7 +154,8 @@ contracts/escrow/          Soroban version of the escrow + tests
 ## Roadmap
 
 - **Wallets:** a passkey smart account for the traveller (OpenZeppelin smart accounts) and fee sponsorship, so travellers never hold XLM.
-- **Cash-out:** a SEP-24 anchor, such as MoneyGram, for bank or cash withdrawal in 170+ countries.
+- **Cash-out:** a SEP-10 + SEP-24 anchor (MoneyGram Access, for example) behind *Send to my bank card*, for bank or cash withdrawal in 170+ countries. Today the button explains the step; the payout stops at the traveller's Stellar account.
+- **Escrow as a service:** run the claim on Trustless Work's single-release escrow (customs as approver and release signer, the shop as dispute resolver after the deadline), alongside the native claimable-balance version.
 - **Identity:** proof of non-EU residence from the passport chip, in zero knowledge, without storing passport data (Human ID / Stellar Passport).
 - **Float yield:** VAT waits up to 3 months in escrow. Placing it in a yield vault (DeFindex) can fund the fee, so the traveller gets 100%.
 - **Distribution:** start with partner shops in one district of Lisbon, then offer Carimbo to tax authorities as the payment layer of their existing electronic export validation.
