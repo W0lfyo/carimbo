@@ -26,7 +26,9 @@ export const ASSET_CODES: Record<Code, string> = {
   KRW: 'cKRW',
 };
 
-export type Role = 'issuer' | 'maker' | 'platform' | 'customs' | 'traveller' | 'lojaAzul' | 'casaVerde';
+export type ShopRole = 'lojaAzul' | 'casaVerde' | 'fioAlfama' | 'lume' | 'gaivota';
+export type Role = 'issuer' | 'maker' | 'platform' | 'customs' | 'traveller' | ShopRole;
+export const SHOP_ROLES: ShopRole[] = ['lojaAzul', 'casaVerde', 'fioAlfama', 'lume', 'gaivota'];
 
 export interface ChainConfig {
   network: 'testnet';
@@ -34,27 +36,32 @@ export interface ChainConfig {
   escrow: 'claimable-balances';
   feeBps: number;
   issuer: string;
-  accounts: Record<Role, { publicKey: string; secret: string }>;
+  // Shops added after the first deployment may be missing from older configs.
+  accounts: Record<Exclude<Role, ShopRole>, { publicKey: string; secret: string }> & Partial<Record<ShopRole, { publicKey: string; secret: string }>>;
 }
 
 const CONFIG_KEY = 'carimbo.chain.v2';
 let config: ChainConfig | null = null;
 
 export async function loadConfig(): Promise<ChainConfig | null> {
+  let local: ChainConfig | null = null;
+  let shared: ChainConfig | null = null;
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
-    if (raw) config = JSON.parse(raw) as ChainConfig;
+    if (raw) local = JSON.parse(raw) as ChainConfig;
   } catch {
     /* ignore */
   }
-  if (!config) {
-    try {
-      const res = await fetch('./chain.json', { cache: 'no-store' });
-      if (res.ok) config = (await res.json()) as ChainConfig;
-    } catch {
-      /* not deployed yet: the app stays in simulated mode */
-    }
+  try {
+    const res = await fetch('./chain.json', { cache: 'no-store' });
+    if (res.ok) shared = (await res.json()) as ChainConfig;
+  } catch {
+    /* not deployed yet: the app stays in simulated mode */
   }
+  // A fresh deployment made from this browser wins; the same deployment picks up
+  // accounts added to chain.json since (new shops).
+  if (local && shared && local.issuer === shared.issuer) config = { ...local, accounts: { ...local.accounts, ...shared.accounts } };
+  else config = local ?? shared;
   return config;
 }
 
@@ -76,7 +83,20 @@ export function asset(code: Code, issuer = config!.issuer): Asset {
 }
 
 export function keypair(role: Role): Keypair {
-  return Keypair.fromSecret(config!.accounts[role].secret);
+  const acc = config!.accounts[role];
+  if (!acc) throw new Error(`No Testnet account for ${role} yet. Open /#/setup to activate it.`);
+  return Keypair.fromSecret(acc.secret);
+}
+
+/** A failed transaction that still reached the ledger: it has a hash to show. */
+export class ChainError extends Error {
+  constructor(
+    message: string,
+    public hash: string,
+    public opCodes: string[],
+  ) {
+    super(message);
+  }
 }
 
 /** Our amounts are hundredths; Stellar assets have 7 decimals. */
@@ -114,9 +134,9 @@ export async function submitClassicTx(source: Keypair, ops: xdr.Operation[], sig
       const res = await horizon.submitTransaction(tx);
       return { hash: res.hash, tx };
     } catch (e: unknown) {
-      const err = e as { response?: { status?: number; data?: { extras?: { result_codes?: { transaction?: string } } } } };
+      const err = e as { response?: { status?: number; data?: { extras?: { result_codes?: { transaction?: string; operations?: string[] } } } } };
       const codes = err.response?.data?.extras?.result_codes;
-      if (codes && codes.transaction !== 'tx_bad_seq') throw new Error(`Transaction failed: ${JSON.stringify(codes)}`);
+      if (codes && codes.transaction !== 'tx_bad_seq') throw new ChainError(`Transaction failed: ${JSON.stringify(codes)}`, hash, codes.operations ?? []);
       lastError = codes ? JSON.stringify(codes) : (e as Error).message;
     }
     await new Promise((r) => setTimeout(r, 2500 * (attempt + 1)));
@@ -214,7 +234,7 @@ export async function chainReject(items: (ReleaseItem & { shop: Role })[]) {
   const customs = keypair('customs');
   const ops = items.flatMap((i) => [
     Operation.claimClaimableBalance({ balanceId: i.balanceId }),
-    Operation.payment({ destination: config!.accounts[i.shop].publicKey, asset: asset(i.currency), amount: toAmount(i.vatMinor) }),
+    Operation.payment({ destination: config!.accounts[i.shop]!.publicKey, asset: asset(i.currency), amount: toAmount(i.vatMinor) }),
   ]);
   return { hash: await submitClassic(customs, ops) };
 }

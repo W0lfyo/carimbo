@@ -3,6 +3,8 @@ import { ledger, useLedger } from '../lib/ledger';
 import { convert, fmt, fmtPlain, shortDate } from '../lib/money';
 import { countryOf } from '../lib/countries';
 import { Stamp } from '../components/Stamp';
+import { SHORT_WINDOW, clockTime, countdown, useNow } from '../lib/clock';
+import { ChainError, txUrl } from '../lib/stellar';
 
 export function CustomsView({ compact = false }: { compact?: boolean }) {
   const s = useLedger();
@@ -11,15 +13,22 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
   const [opened, setOpened] = useState(false);
   const [inspect, setInspect] = useState(false);
   const [working, setWorking] = useState<'stamp' | 'refuse' | null>(null);
-  const [failure, setFailure] = useState('');
+  const [failure, setFailure] = useState<{ text: string; tx?: string } | null>(null);
 
   async function act(kind: 'stamp' | 'refuse') {
     setWorking(kind);
-    setFailure('');
+    setFailure(null);
     try {
       await (kind === 'stamp' ? ledger.clearTrip() : ledger.rejectTrip());
     } catch (err) {
-      setFailure(`Stellar did not accept the signature: ${(err as Error).message}`);
+      const e = err as Error;
+      const late = (e instanceof ChainError && e.opCodes.includes('op_cannot_claim')) || e.message.includes('op_cannot_claim');
+      setFailure({
+        text: late
+          ? `Stellar refused the signature: the export window closed at ${clockTime(earliest)}. The protocol no longer lets customs claim this VAT. Only the shop can take it back.`
+          : `Stellar did not accept the signature: ${e.message}`,
+        tx: e instanceof ChainError ? e.hash : undefined,
+      });
     } finally {
       setWorking(null);
     }
@@ -32,6 +41,9 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
   const shopOf = (id: string) => s.shops.find((x) => x.id === id)!;
   const lastStamp = s.stampedAt && Date.now() - s.stampedAt < 60_000 && open.length === 0 ? s.stampedAt : undefined;
   const showDossier = open.length > 0 && (opened || compact);
+  const earliest = open.length ? Math.min(...open.map((c) => c.deadline)) : 0;
+  const now = useNow(open.length > 0 && earliest - Date.now() < SHORT_WINDOW && earliest > Date.now() - 5000);
+  const closed = open.length > 0 && earliest <= now;
 
   const [lookupMsg, setLookupMsg] = useState('');
 
@@ -139,10 +151,18 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
                   </span>
                 </li>
                 <li>
-                  <span className="checks__ok" aria-hidden="true">✓</span>
+                  <span className={closed ? 'checks__ok checks__ok--no' : 'checks__ok'} aria-hidden="true">
+                    {closed ? '✕' : '✓'}
+                  </span>
                   <span>
-                    <strong>Inside the export window</strong>
-                    <span className="muted small">Earliest deadline {shortDate(Math.min(...open.map((c) => c.deadline)))}</span>
+                    <strong>{closed ? 'Export window closed' : 'Inside the export window'}</strong>
+                    <span className="muted small">
+                      {closed
+                        ? `Closed at ${clockTime(earliest)}. Stellar will refuse the release.`
+                        : earliest - now < SHORT_WINDOW
+                          ? `Closes in ${countdown(earliest - now)}, at ${clockTime(earliest)}`
+                          : `Earliest deadline ${shortDate(earliest)}`}
+                    </span>
                   </span>
                 </li>
               </ul>
@@ -191,7 +211,16 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
                   </>
                 )}
               </div>
-              {failure && <p className="field__hint field__hint--error">{failure}</p>}
+              {failure && (
+                <p className="field__hint field__hint--error" role="alert">
+                  {failure.text}{' '}
+                  {failure.tx && (
+                    <a href={txUrl(failure.tx)} target="_blank" rel="noreferrer">
+                      See the refused transaction
+                    </a>
+                  )}
+                </p>
+              )}
               <p className="muted small">Your signature releases the escrow on Stellar. The traveller is paid in her currency within seconds.</p>
             </>
           ) : lastStamp ? (

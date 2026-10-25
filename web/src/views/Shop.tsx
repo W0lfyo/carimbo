@@ -4,6 +4,18 @@ import { CURRENCIES, MAX_EUR_MINOR, convert, fmt, inputAmount, parseAmount, shor
 import { COUNTRIES, countryOf, detectCountry, ruleText } from '../lib/countries';
 import type { Claim, ClaimStatus } from '../lib/types';
 import { QR } from '../components/QR';
+import { SHORT_WINDOW, clockTime, countdown, useNow } from '../lib/clock';
+import { txUrl } from '../lib/stellar';
+
+/** What each demo shop typically sells, to prefill the first line of the till. */
+const SAMPLE: Record<string, { item: string; amount: string }> = {
+  'loja-azul': { item: 'Leather bag', amount: '400.00' },
+  'casa-verde': { item: 'Ceramics set', amount: '200.00' },
+  'fio-de-alfama': { item: 'Linen tablecloth', amount: '180.00' },
+  'ourivesaria-lume': { item: 'Gold filigree earrings', amount: '650.00' },
+  'sapataria-gaivota': { item: 'Leather loafers', amount: '240.00' },
+};
+const DEMO_WINDOW_MS = 2 * 60_000;
 
 const STATUS: Record<ClaimStatus, { label: string; tone: string }> = {
   locked: { label: 'In escrow', tone: 'waiting' },
@@ -33,7 +45,11 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
   const country = countryOf(shop.country);
   const cur = country.currency;
   const detected = detectCountry().code;
-  const [lines, setLines] = useState<BasketLine[]>(() => [{ id: 1, item: 'Leather bag', amount: '400.00', rate: country.rates[0].rate }]);
+  const sample = (id: string) => SAMPLE[id] ?? SAMPLE['loja-azul'];
+  const [lines, setLines] = useState<BasketLine[]>(() => [{ id: 1, ...sample(initialShop), rate: country.rates[0].rate }]);
+  const [shortWindow, setShortWindow] = useState(false);
+  const [reclaiming, setReclaiming] = useState<string | null>(null);
+  const [reclaimMsg, setReclaimMsg] = useState<{ text: string; tx?: string; error?: boolean } | null>(null);
   const [current, setCurrent] = useState<Claim | null>(null);
   const [locking, setLocking] = useState(false);
   const [failure, setFailure] = useState('');
@@ -70,6 +86,21 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
   const removeLine = (id: number) => setLines((ls) => (ls.length > 1 ? ls.filter((l) => l.id !== id) : ls));
 
   const sales = s.claims.filter((c) => c.shopId === shopId);
+  // Tick every second while a short (demo) export window is running.
+  const now = useNow(sales.some((c) => c.status === 'locked' && c.deadline - Date.now() < SHORT_WINDOW && c.deadline > Date.now() - 5000));
+
+  async function takeBack(c: Claim) {
+    setReclaiming(c.id);
+    setReclaimMsg(null);
+    try {
+      const tx = await ledger.reclaim(c.id);
+      setReclaimMsg({ text: `${fmt(c.vatCents, c.currency)} is back in the shop’s account. Stellar allowed it because the deadline has passed.`, tx });
+    } catch (err) {
+      setReclaimMsg({ text: `Stellar refused: ${(err as Error).message}`, error: true });
+    } finally {
+      setReclaiming(null);
+    }
+  }
   // In the demo stage, sales can be created by the story player: show the newest one.
   const recent = compact ? sales.find((c) => Date.now() - c.createdAt < 10 * 60_000) : undefined;
   const live = current ? s.claims.find((c) => c.id === current.id) : recent;
@@ -89,6 +120,8 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
                 onClick={() => {
                   setShopId(x.id);
                   setCurrent(null);
+                  setReclaimMsg(null);
+                  setLines([{ id: 1, ...sample(x.id), rate: countryOf(x.country).rates[0].rate }]);
                 }}
               >
                 {x.name}
@@ -157,6 +190,7 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
               .createSale(
                 shopId,
                 parsed.map((l) => ({ item: l.item.trim(), paidMinor: l.minor!, vatRate: l.rate })),
+                shortWindow ? DEMO_WINDOW_MS : undefined,
               )
               .then(setCurrent)
               .catch((err: Error) => setFailure(`The escrow did not accept the sale: ${err.message}`))
@@ -224,6 +258,13 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
                   ? `Tax-free in ${country.name} needs at least ${fmt(country.minPurchase, cur)} on one receipt.`
                   : `${minText} For visitors living ${country.zone}: ${ruleText(country.exportRule)}.`}
           </p>
+          <label className="check">
+            <input type="checkbox" checked={shortWindow} onChange={(e) => setShortWindow(e.target.checked)} />
+            <span>
+              <strong>Demo: 2-minute export window</strong>
+              <span className="muted small">Shortens the legal window so you can watch Stellar refuse a late stamp and return the VAT to the shop.</span>
+            </span>
+          </label>
           <button type="submit" className="btn btn--go btn--block btn--big" disabled={!canLock || locking}>
             {locking ? 'Locking VAT on Stellar…' : 'Lock VAT and show QR'}
           </button>
@@ -242,6 +283,17 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
               <p className="muted center">
                 {live.travellerId ? 'Added to the traveller’s phone.' : `${fmt(live.vatCents, live.currency)} is in escrow on Stellar, waiting for the traveller to scan.`}
               </p>
+              {live.status === 'locked' && live.deadline - now < SHORT_WINDOW && (
+                <p className={`window-timer${live.deadline <= now ? ' window-timer--closed' : ''}`} role="timer">
+                  {live.deadline > now ? (
+                    <>
+                      Export window closes in <span className="mono">{countdown(live.deadline - now)}</span>
+                    </>
+                  ) : (
+                    `Export window closed at ${clockTime(live.deadline)}. Only the shop can claim this VAT now.`
+                  )}
+                </p>
+              )}
               {live.travellerId && (
                 <button type="button" className="btn btn--line btn--small" onClick={() => setCurrent(null)}>
                   Next sale
@@ -284,8 +336,9 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
               </thead>
               <tbody>
                 {sales.map((c) => {
-                  const expired = c.status === 'locked' && c.deadline < Date.now();
-                  const st = expired ? { label: 'Deadline passed', tone: 'danger' } : STATUS[c.status];
+                  const expired = c.status === 'locked' && c.deadline < now;
+                  const short = c.status === 'locked' && !expired && c.deadline - now < SHORT_WINDOW;
+                  const st = expired ? { label: 'Deadline passed', tone: 'danger' } : short ? { label: `In escrow, ${countdown(c.deadline - now)} left`, tone: 'waiting' } : STATUS[c.status];
                   return (
                     <tr key={c.id}>
                       <td>{shortDate(c.createdAt)}</td>
@@ -299,8 +352,8 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
                       </td>
                       <td className="right">
                         {expired && (
-                          <button type="button" className="btn btn--line btn--small" onClick={() => void ledger.reclaim(c.id)}>
-                            Take VAT back
+                          <button type="button" className="btn btn--line btn--small" disabled={reclaiming !== null} onClick={() => void takeBack(c)}>
+                            {reclaiming === c.id ? 'Claiming on Stellar…' : 'Take VAT back'}
                           </button>
                         )}
                       </td>
@@ -310,6 +363,16 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
               </tbody>
             </table>
           </div>
+          {reclaimMsg && (
+            <p className={reclaimMsg.error ? 'field__hint field__hint--error' : 'notice'} role="status">
+              {reclaimMsg.text}{' '}
+              {reclaimMsg.tx && (
+                <a href={txUrl(reclaimMsg.tx)} target="_blank" rel="noreferrer">
+                  See it on Stellar
+                </a>
+              )}
+            </p>
+          )}
         </section>
       )}
     </div>

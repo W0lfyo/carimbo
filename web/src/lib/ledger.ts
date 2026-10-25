@@ -37,6 +37,9 @@ function seed(): LedgerState {
     shops: [
       { id: 'loja-azul', name: 'Loja Azul', area: 'Chiado, Lisbon', domain: 'lojaazul.pt', country: 'PT' },
       { id: 'casa-verde', name: 'Casa Verde', area: 'Príncipe Real, Lisbon', domain: 'casaverde.pt', country: 'PT' },
+      { id: 'fio-de-alfama', name: 'Fio de Alfama', area: 'Alfama, Lisbon', domain: 'fiodealfama.pt', country: 'PT' },
+      { id: 'ourivesaria-lume', name: 'Ourivesaria Lume', area: 'Baixa, Lisbon', domain: 'ourivesarialume.pt', country: 'PT' },
+      { id: 'sapataria-gaivota', name: 'Sapataria Gaivota', area: 'Campo de Ourique, Lisbon', domain: 'sapatariagaivota.pt', country: 'PT' },
     ],
     traveller: {
       id: 'maya',
@@ -87,7 +90,12 @@ function seed(): LedgerState {
 function load(): LedgerState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as LedgerState;
+    if (raw) {
+      // Shops added in a later version join an existing local ledger.
+      const saved = JSON.parse(raw) as LedgerState;
+      const missing = seed().shops.filter((x) => !saved.shops.some((y) => y.id === x.id));
+      return missing.length ? { ...saved, shops: [...saved.shops, ...missing] } : saved;
+    }
   } catch {
     /* storage unavailable: start fresh */
   }
@@ -127,7 +135,13 @@ function activity(kind: ActivityKind, label: string, amount: string, tx?: string
   return { id: hex(6), at: Date.now(), kind, label, amount, tx: tx || hex(), live: !!tx && !onChainNoHash };
 }
 
-const SHOP_ROLE: Record<string, Role> = { 'loja-azul': 'lojaAzul', 'casa-verde': 'casaVerde' };
+const SHOP_ROLE: Record<string, Role> = {
+  'loja-azul': 'lojaAzul',
+  'casa-verde': 'casaVerde',
+  'fio-de-alfama': 'fioAlfama',
+  'ourivesaria-lume': 'lume',
+  'sapataria-gaivota': 'gaivota',
+};
 const live = () => getConfig() !== null;
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -183,7 +197,11 @@ async function clearTripInner(): Promise<void> {
     );
     releaseTx = res.hash;
     chainReceived = res.received;
-  } else await pause(500);
+  } else {
+    await pause(500);
+    // Same rule as the claimable-balance predicate on Stellar.
+    if (mine.some((c) => c.deadline < Date.now())) throw new Error('op_cannot_claim: the export window is closed');
+  }
 
   // Share each currency group's converted amount across its claims.
   const received = new Map<string, number>();
@@ -236,7 +254,8 @@ async function clearTripInner(): Promise<void> {
 export const ledger = {
   get: () => state,
 
-  async createSale(shopId: string, items: { item: string; paidMinor: number; vatRate: number }[]): Promise<Claim> {
+  /** `windowMs` shortens the export window, for the demo of an expired claim. */
+  async createSale(shopId: string, items: { item: string; paidMinor: number; vatRate: number }[], windowMs?: number): Promise<Claim> {
     const now = Date.now();
     const shop = state.shops.find((s) => s.id === shopId)!;
     const country = countryOf(shop.country);
@@ -245,7 +264,7 @@ export const ledger = {
     const paidMinor = lines.reduce((n, l) => n + l.paidMinor, 0);
     const item = lines.length > 1 ? `${lines[0].item} + ${lines.length - 1} more` : lines[0].item;
     const vatRate = lines[0].vatRate;
-    const deadline = exportDeadline(new Date(now), country.exportRule);
+    const deadline = windowMs ? now + windowMs : exportDeadline(new Date(now), country.exportRule);
     let balanceId: string | undefined;
     let tx: string | undefined;
     if (live()) {
@@ -391,7 +410,11 @@ export const ledger = {
   /** Seen on Stellar: the balances are gone without a refund to the traveller. */
   applyClosed(ids: string[]) {
     if (!ids.length) return;
-    commit({ ...state, claims: state.claims.map((c) => (ids.includes(c.id) && c.status === 'locked' ? { ...c, status: 'rejected' } : c)) });
+    const now = Date.now();
+    commit({
+      ...state,
+      claims: state.claims.map((c) => (ids.includes(c.id) && c.status === 'locked' ? { ...c, status: c.deadline < now ? 'reclaimed' : 'rejected' } : c)),
+    });
   },
 
   /** Customs stamps the whole trip: every open claim is released, then converted on the DEX. */
@@ -420,7 +443,8 @@ export const ledger = {
     });
   },
 
-  async reclaim(claimId: string): Promise<void> {
+  /** Returns the Stellar transaction hash when it ran on Testnet. */
+  async reclaim(claimId: string): Promise<string | undefined> {
     const claim = state.claims.find((c) => c.id === claimId);
     if (!claim || claim.status !== 'locked' || claim.deadline > Date.now()) return;
     let tx: string | undefined;
@@ -431,6 +455,7 @@ export const ledger = {
       claims: state.claims.map((c) => (c.id === claimId ? { ...c, status: 'reclaimed' } : c)),
       activity: [activity('reclaim', `Deadline passed, ${shop?.name ?? 'shop'} took its VAT back`, fmt(claim.vatCents, claim.currency), tx), ...state.activity],
     });
+    return tx;
   },
 
   /** The traveller closes a finished trip: past claims leave her screen. */

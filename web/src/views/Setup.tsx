@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Keypair, Operation } from '@stellar/stellar-sdk';
 import { CURRENCIES, type Code } from '../lib/money';
-import { ASSET_CODES, accountUrl, asset, fund, getConfig, saveConfig, submitClassic, txUrl, type ChainConfig, type Role } from '../lib/stellar';
+import { ASSET_CODES, SHOP_ROLES, accountUrl, asset, balances, fund, getConfig, keypair, saveConfig, submitClassic, txUrl, type ChainConfig, type Role } from '../lib/stellar';
 
-const ROLES: Role[] = ['issuer', 'maker', 'platform', 'customs', 'traveller', 'lojaAzul', 'casaVerde'];
+const ROLES: Role[] = ['issuer', 'maker', 'platform', 'customs', 'traveller', ...SHOP_ROLES];
 const LOCAL: Code[] = ['EUR', 'CHF', 'JPY', 'SGD', 'KRW'];
 const ALL = Object.keys(ASSET_CODES) as Code[];
 const FEE_BPS = 50;
@@ -27,7 +27,7 @@ export function Setup() {
     setLines([]);
     try {
       const keys = Object.fromEntries(ROLES.map((r) => [r, Keypair.random()])) as Record<Role, Keypair>;
-      log({ text: 'Funding 7 test accounts with Friendbot…' });
+      log({ text: `Funding ${ROLES.length} test accounts with Friendbot…` });
       await Promise.all(ROLES.map((r) => fund(keys[r].publicKey())));
       log({ text: 'Accounts funded', tone: 'ok' });
 
@@ -40,6 +40,9 @@ export function Setup() {
         platform: LOCAL,
         lojaAzul: LOCAL,
         casaVerde: LOCAL,
+        fioAlfama: LOCAL,
+        lume: LOCAL,
+        gaivota: LOCAL,
       };
       log({ text: 'Opening trustlines for the demo stablecoins…' });
       await Promise.all(
@@ -57,7 +60,7 @@ export function Setup() {
       const mint = await submitClassic(keys.issuer, [
         ...ALL.map((c) => Operation.payment({ destination: keys.maker.publicKey(), asset: asset(c, issuer), amount: big(c, 5_000_000) })),
         ...LOCAL.flatMap((c) =>
-          (['lojaAzul', 'casaVerde'] as Role[]).map((r) => Operation.payment({ destination: keys[r].publicKey(), asset: asset(c, issuer), amount: big(c, 200_000) })),
+          SHOP_ROLES.map((r) => Operation.payment({ destination: keys[r].publicKey(), asset: asset(c, issuer), amount: big(c, 200_000) })),
         ),
       ]);
       log({ text: 'Stablecoins issued', href: txUrl(mint), tone: 'ok' });
@@ -96,6 +99,47 @@ export function Setup() {
     }
   }
 
+  /**
+   * Shops listed in chain.json after the first deployment: fund them, open their
+   * trustlines and give them working stablecoins. Safe to run again.
+   */
+  async function activateShops() {
+    const cfg = getConfig();
+    if (!cfg) return;
+    setBusy(true);
+    setLines([]);
+    try {
+      const shops = SHOP_ROLES.filter((r) => cfg.accounts[r]);
+      for (const r of shops) {
+        const pk = cfg.accounts[r]!.publicKey;
+        let held: Record<string, string> | null = null;
+        try {
+          held = await balances(pk);
+        } catch {
+          log({ text: `${r}: funding with Friendbot…` });
+          await fund(pk);
+          held = await balances(pk);
+        }
+        const missing = LOCAL.filter((c) => held![ASSET_CODES[c]] === undefined);
+        if (missing.length) {
+          const hash = await submitClassic(keypair(r), missing.map((c) => Operation.changeTrust({ asset: asset(c) })));
+          log({ text: `${r}: ${missing.length} trustlines`, href: txUrl(hash) });
+        }
+        if (Number(held.cEUR ?? 0) < 1000) {
+          const big = (c: Code) => (CURRENCIES[c].perEur * 200_000).toFixed(2);
+          const hash = await submitClassic(keypair('issuer'), LOCAL.map((c) => Operation.payment({ destination: pk, asset: asset(c), amount: big(c) })));
+          log({ text: `${r}: stablecoins issued`, href: txUrl(hash) });
+        }
+        log({ text: `${r} ready`, href: accountUrl(pk), tone: 'ok' });
+      }
+      log({ text: `${shops.length} shops live on Testnet.`, tone: 'ok' });
+    } catch (e) {
+      log({ text: (e as Error).message, tone: 'err' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className="page">
       <div className="desk">
@@ -104,6 +148,11 @@ export function Setup() {
             <h1 className="title">Testnet setup</h1>
             <span className="muted">Creates the demo accounts, the demo stablecoins and their liquidity on the Stellar DEX.</span>
           </div>
+          {result && (
+            <button type="button" className="btn btn--line" onClick={activateShops} disabled={busy}>
+              Activate the shops
+            </button>
+          )}
           <button type="button" className="btn btn--go" onClick={run} disabled={busy}>
             {busy ? 'Deploying…' : result ? 'Deploy a fresh copy' : 'Deploy to Testnet'}
           </button>

@@ -978,3 +978,49 @@
   border-bottom: 1px solid var(--line);
   animation: rise var(--t-move) var(--ease-out) both;
 }
+
+/* ---------- export window (demo countdown) ---------- */
+.checks__ok--no {
+  background: var(--danger);
+}
+
+.window-timer {
+  margin: 0;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  font-size: var(--step--1);
+  text-align: center;
+}
+
+.window-timer--closed {
+  border-radius: 12px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  cursor: pointer;
+}
+
+.check input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--ink);
+}
+
+.check > span {
+  display: grid;
+  gap: 2px;
+  font-size: var(--step--1);
+}
+
+.shop-switch__options {
+  flex-wrap: wrap;
+  border-radius: 20px;
+}

@@ -10,6 +10,7 @@ import { Board } from '../components/Board';
 import { QR } from '../components/QR';
 import { Stamp } from '../components/Stamp';
 import { SplitFlap } from '../components/SplitFlap';
+import { biometricName, hasPasskeyDevice, passkeyReady, verifyTraveller } from '../lib/passkey';
 
 type Screen = 'trip' | 'airport';
 
@@ -30,11 +31,16 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
   const [typed, setTyped] = useState('');
   const [error, setError] = useState('');
   const [cashout, setCashout] = useState(false);
+  const [passkey, setPasskey] = useState(hasPasskeyDevice());
+  useEffect(() => {
+    void passkeyReady.then(setPasskey);
+  }, []);
 
   const mine = s.claims.filter((c) => c.travellerId === t.id && !c.archived).sort((a, b) => a.createdAt - b.createdAt);
   const open = mine.filter((c) => c.status === 'locked');
   const paid = mine.filter((c) => c.status === 'refunded');
   const rejected = mine.filter((c) => c.status === 'rejected');
+  const expired = mine.filter((c) => c.status === 'reclaimed');
   const pending = joinCode ? s.claims.find((c) => c.code === joinCode && c.status === 'locked' && c.travellerId !== t.id) : undefined;
   const shopOf = (id: string) => s.shops.find((x) => x.id === id)!;
 
@@ -63,6 +69,14 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
   async function join(codeToJoin: string) {
     setBusy(true);
     setError('');
+    // The traveller confirms with Face ID / Touch ID / Windows Hello before her account signs.
+    try {
+      await verifyTraveller(t.name);
+    } catch (err) {
+      setBusy(false);
+      setError((err as Error).message);
+      return;
+    }
     let ok = null;
     try {
       ok = await ledger.join(codeToJoin);
@@ -121,9 +135,10 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
         <div className="grow" />
         <button type="button" className="btn btn--go btn--big btn--block" disabled={busy} onClick={() => join(pending.code)}>
           <FaceIdIcon />
-          {busy ? 'Adding it to your account…' : 'Continue with Face ID'}
+          {busy ? 'Adding it to your account…' : passkey ? `Continue with ${biometricName()}` : 'Add to my trip'}
         </button>
-        <p className="fineprint">No seed phrase, no crypto to buy.</p>
+        {error && <p className="field__hint field__hint--error center">{error}</p>}
+        <p className="fineprint">{passkey ? 'A passkey on this device, no seed phrase, no crypto to buy.' : 'No seed phrase, no crypto to buy.'}</p>
       </div>
     );
   }
@@ -261,9 +276,11 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
         <LogoMark />
         <span>Carimbo</span>
       </div>
-      <h1 className="headline">{rejected.length ? 'Customs did not clear this trip.' : 'Shopping abroad?'}</h1>
+      <h1 className="headline">{expired.length ? 'The export window closed.' : rejected.length ? 'Customs did not clear this trip.' : 'Shopping abroad?'}</h1>
       <p className="lede">
-        {rejected.length
+        {expired.length
+          ? 'Customs did not stamp before the deadline, so Stellar returned the VAT to the shop. Next time, scan at the airport kiosk before you fly.'
+          : rejected.length
           ? 'The VAT went back to the shops. Ask the customs officer what was missing, or contact the shop.'
           : 'Ask for Carimbo at the till. Scan the code on screen and your VAT is set aside for you until you fly home.'}
       </p>

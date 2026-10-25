@@ -62,11 +62,12 @@ sequenceDiagram
 | Stablecoins per currency | **Issued assets** with trustlines: cEUR, cUSD, cGBP, cJPY, cBRL, cCNY, cCHF, cSGD, cKRW | `web/src/views/Setup.tsx` |
 | Liquidity between currencies | Market-maker **offers** on the DEX, two-sided around a reference rate | `Setup.tsx` |
 | Shared state across devices, no server | Traveller **data entries** (`manage_data`) and Horizon reads, polled every 4 s | `web/src/lib/sync.ts` |
+| Deadline enforced by the network | A late customs stamp fails on-chain with `op_cannot_claim`; the shop's reclaim succeeds. Shown live with the 2-minute demo window | `chainRelease`, `chainReclaim` |
 | Survive a busy public Testnet | Lookup by transaction hash and safe resubmission after a 504 | `submitClassicTx` |
 
 ### Testnet deployment
 
-All accounts are created and funded by `/#/setup`, and the result is committed as [`web/public/chain.json`](web/public/chain.json).
+All accounts are created and funded by `/#/setup`, and the result is committed as [`web/public/chain.json`](web/public/chain.json). The five shops are fictional Lisbon boutiques, each with its own Testnet account; shops added later are activated by *Activate the shops* on the same page.
 
 | Role | Account |
 |---|---|
@@ -74,6 +75,9 @@ All accounts are created and funded by `/#/setup`, and the result is committed a
 | Customs signer | [`GBHEL52N…VRXS`](https://stellar.expert/explorer/testnet/account/GBHEL52NNUONBCXPYRBS2H5USLHMZBMQAG4AKMTSPSUNFB36QM67VRXS) |
 | Shop: Loja Azul | [`GAERIXHJ…LJWZ`](https://stellar.expert/explorer/testnet/account/GAERIXHJVCRREBD36TDWAKZ6HWEWIRBIFIJDMLVXABX4C4P4XYXXLJWZ) |
 | Shop: Casa Verde | [`GAYSK5GX…7ZWK`](https://stellar.expert/explorer/testnet/account/GAYSK5GXB2YJJRYJSMXB6SLVZV7RX6MGCAYBPTRRRT5PMBDEJXLJ7ZWK) |
+| Shop: Fio de Alfama | [`GDBE3247…K3LG`](https://stellar.expert/explorer/testnet/account/GDBE3247ZMOC2EIHFP2IM6JM2W4XQNP56R4H6FBDMJLXLVGUZNJAK3LG) |
+| Shop: Ourivesaria Lume | [`GCTOUT37…L4QO`](https://stellar.expert/explorer/testnet/account/GCTOUT37XBH54CKDY4LMDSSGMUIHC2RPM5WAS5ILUERDV6HOC433L4QO) |
+| Shop: Sapataria Gaivota | [`GDUTP6VO…RKI4`](https://stellar.expert/explorer/testnet/account/GDUTP6VOOUEN4CBRO7RFVM7PKLJBSGI24MVESN7QIQVBRU273UMQRKI4) |
 | Traveller (demo) | [`GDOYUFNJ…D3OO`](https://stellar.expert/explorer/testnet/account/GDOYUFNJIUEWLM3RY6JIAGJW3Z5MDYU67G2PVSZSBE5S66PTQWCWD3OO) |
 | Platform (fees) | [`GACTLR4R…L5QH`](https://stellar.expert/explorer/testnet/account/GACTLR4RG6NWVFOA6AWO7GSEEVEEYMXKDM4NYES3RHO2KJ4OLMZCL5QH) |
 | DEX market maker | [`GDK5HA6P…A4LU`](https://stellar.expert/explorer/testnet/account/GDK5HA6POIHRIIWX3HYJYCRDYG35MVP5Y7UHXYMRVISU3QVU5CFZA4LU) |
@@ -115,11 +119,24 @@ npm run dev                 # http://localhost:5173
 **Two devices, the real flow:**
 
 1. **Laptop:** *Shop* tab, then **Lock VAT and show QR**.
-2. **Phone:** scan the QR with the camera, then **Continue with Face ID**. Optionally pick another payout currency.
+2. **Phone:** scan the QR with the camera, then **Continue with Face ID** (Touch ID on a Mac, Windows Hello on a PC). Optionally pick another payout currency.
 3. **Laptop:** *Customs* tab. The traveller appears within seconds. Open the claim, then **Stamp and release**.
 4. **Phone:** the stamp lands and the converted amount arrives.
 
+**The deadline, enforced by Stellar (about 3 minutes):**
+
+1. **Shop:** tick **Demo: 2-minute export window**, then lock the VAT. A countdown starts on the till.
+2. **Phone:** add the receipt to the trip.
+3. **Customs:** wait until the window closes (the check turns red), then press **Stamp and release**. Stellar rejects the transaction with `op_cannot_claim`, and the refused transaction is linked.
+4. **Shop:** the sale shows *Deadline passed*. **Take VAT back** claims the balance; this time the protocol accepts. The phone shows that the window closed.
+
 Also try: the shop switcher (several shops, one trip), several items per receipt, the country menu (VAT rates, minimums and export windows of 15 countries), and an unknown code at the customs desk.
+
+## Passkey
+
+Before the traveller's account signs anything, the phone asks for **Face ID, Touch ID, Windows Hello or a fingerprint** through WebAuthn ([`web/src/lib/passkey.ts`](web/src/lib/passkey.ts)). The first scan creates a passkey on the device (ES256, the P-256 curve); the next ones must confirm it. On a device without a platform authenticator, the flow continues without it.
+
+In this demo, the passkey gates the traveller's Testnet key held by the app. In production the same P-256 passkey becomes the signer of a Stellar smart account, verified on-chain, so the traveller has no secret key at all (see roadmap).
 
 ## Architecture
 
@@ -128,6 +145,7 @@ web/                       React + TypeScript + Vite, deployed on Vercel
   src/lib/stellar.ts       every Stellar call: claimable balances, DEX paths, atomic release, reads
   src/lib/ledger.ts        app state and actions; live on Testnet or simulated with the same rules
   src/lib/sync.ts          multi-device sync from the ledger (attachments, currency, refunds)
+  src/lib/passkey.ts       WebAuthn check before the traveller signs
   src/lib/countries.ts     tax-free rules: VAT rates, minimums, currencies, export windows
   src/views/               Demo, Shop, Traveller, Customs, Setup
 contracts/escrow/          Soroban version of the escrow + tests
