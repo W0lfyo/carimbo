@@ -88,6 +88,11 @@ All accounts are created and funded by `/#/setup`, and the result is committed a
 2. Traveller attaches it from her phone: [`fc78d9db…bbb1`](https://stellar.expert/explorer/testnet/tx/fc78d9db868844c1960d58359551300369c79d649d2e01ccf7258ccf995abbb1)
 3. Customs releases, the DEX converts, the traveller receives **$86.08** in one transaction: [`0719182a…d261`](https://stellar.expert/explorer/testnet/tx/0719182a3b20d011e1fa4279147a21bcd58bf85f935480e3223d69126ec2d261)
 
+**On-chain evidence**, the deadline enforced by the protocol (2-minute demo window, Ourivesaria Lume):
+
+1. Customs signs after the deadline: the transaction is included in ledger 5389151 and **fails** with `op_cannot_claim`: [`b0568a1e…c5fd`](https://stellar.expert/explorer/testnet/tx/b0568a1e13124b10065c9748d0f471c277824bf8bc56a571cb2cbc42175ac5fd)
+2. The shop claims the same balance back, €121.54, and succeeds: [`0fb87eaf…93bb`](https://stellar.expert/explorer/testnet/tx/0fb87eafea270ac2172bd2879f4de0b63953648c08f54af263976e4f0ff893bb)
+
 > **About the keys in `chain.json`:** they are Testnet-only demo accounts holding worthless test assets. They are public on purpose, so judges can replay the whole flow without installing a wallet. A production version gives each actor their own wallet (see roadmap).
 
 ### The Soroban contract
