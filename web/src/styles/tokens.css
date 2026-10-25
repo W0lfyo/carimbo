@@ -1,0 +1,95 @@
+/* Carimbo design tokens.
+   Direction: airport wayfinding + passport stamp. One action colour (signage yellow),
+   one moment colour (stamp violet, used only when customs clears a traveller). */
+
+:root {
+  /* colour */
+  --yellow: #ffcd00; /* wayfinding signage: every primary action */
+  --yellow-press: #f0be00;
+  --ink: #16181d; /* graphite text and bezels */
+  --tarmac: #2a2d34; /* departure board panels */
+  --tarmac-deep: #1f2127; /* board rows */
+  --board-text: #eef0f2;
+  --board-muted: #9aa0a8;
+  --stamp: #4b3bd1; /* customs stamp: only for "cleared" */
+  --stamp-tint: rgba(75, 59, 209, 0.08);
+  --danger: #b3261e;
+
+  --ground: #d9dcdf; /* terminal floor, page background */
+  --paper: #f7f7f5; /* screen background */
+  --card: #ffffff;
+  --line: #d9dcdf;
+  --line-strong: #16181d;
+  --muted: #4a4f57; /* 7.6:1 on paper */
+  --faint: #6b717a; /* 4.9:1 on paper */
+
+  /* type */
+  --font-sans: 'Instrument Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Martian Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --step--1: 0.8125rem; /* 13 */
+  --step-0: 1rem; /* 16 */
+  --step-1: 1.1875rem; /* 19 */
+  --step-2: 1.5rem; /* 24 */
+  --step-3: clamp(1.75rem, 1.4rem + 1.4vw, 2.25rem);
+  --step-4: clamp(2.25rem, 1.6rem + 2.6vw, 3.5rem);
+
+  /* space (8-pt) */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+  --s8: 64px;
+
+  /* radius: rounder as objects get smaller and more "held" */
+  --r-board: 14px;
+  --r-card: 20px;
+  --r-control: 14px;
+  --r-pill: 999px;
+
+  /* motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
+  --ease-stamp: cubic-bezier(0.5, 0, 0.75, 0); /* accelerates into the paper */
+  --t-micro: 180ms;
+  --t-move: 360ms;
+  --t-scene: 560ms;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --ground: #0f1013;
+    --paper: #16181d;
+    --card: #1f2127;
+    --line: #30343c;
+    --line-strong: #eef0f2;
+    --ink: #eef0f2;
+    --muted: #b9bdc4;
+    --faint: #9aa0a8;
+    --tarmac: #2a2d34;
+    --tarmac-deep: #121317;
+    --stamp: #8f83ff;
+    --stamp-tint: rgba(143, 131, 255, 0.12);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --ground: #0f1013;
+  --paper: #16181d;
+  --card: #1f2127;
+  --line: #30343c;
+  --line-strong: #eef0f2;
+  --ink: #eef0f2;
+  --muted: #b9bdc4;
+  --faint: #9aa0a8;
+  --tarmac: #2a2d34;
+  --tarmac-deep: #121317;
+  --stamp: #8f83ff;
+  --stamp-tint: rgba(143, 131, 255, 0.12);
+  color-scheme: dark;
+}

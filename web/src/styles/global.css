@@ -1,0 +1,342 @@
+@import './tokens.css';
+
+:root {
+  --graphite: #16181d; /* fixed: text on yellow, phone bezel */
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--step-0);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'ss01' 1;
+}
+
+::selection {
+  background: var(--yellow);
+  color: var(--graphite);
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.05;
+  letter-spacing: -0.022em;
+  font-weight: 700;
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1.5px;
+}
+
+a:hover {
+  color: var(--stamp);
+}
+
+:focus-visible {
+  outline: 3px solid var(--stamp);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: 'zero' 1;
+  letter-spacing: -0.02em;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- buttons ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  min-height: 52px;
+  padding: 0 var(--s5);
+  border: 0;
+  border-radius: var(--r-control);
+  font-size: var(--step-0);
+  font-weight: 650;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    transform var(--t-micro) var(--ease-out),
+    background-color var(--t-micro) var(--ease-out),
+    box-shadow var(--t-micro) var(--ease-out);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.btn--go {
+  background: var(--yellow);
+  color: var(--graphite);
+  box-shadow: inset 0 -3px 0 rgba(22, 24, 29, 0.18);
+}
+
+.btn--go:hover:not(:disabled) {
+  background: var(--yellow-press);
+  color: var(--graphite);
+}
+
+.btn--ink {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.btn--ink:hover:not(:disabled) {
+  color: var(--paper);
+  background: color-mix(in srgb, var(--ink) 88%, var(--stamp));
+}
+
+.btn--line {
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1.5px var(--line-strong);
+}
+
+.btn--line:hover:not(:disabled) {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.btn--danger {
+  background: transparent;
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+
+.btn--block {
+  width: 100%;
+}
+
+.btn--big {
+  min-height: 60px;
+  font-size: var(--step-1);
+}
+
+.btn--small {
+  min-height: 40px;
+  padding: 0 var(--s4);
+  font-size: var(--step--1);
+  border-radius: 10px;
+}
+
+/* ---------- fields ---------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.field__label {
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.field__input {
+  min-height: 52px;
+  padding: 0 var(--s4);
+  border-radius: 12px;
+  border: 1.5px solid var(--line);
+  background: var(--card);
+  transition: border-color var(--t-micro) var(--ease-out);
+}
+
+.field__input:hover {
+  border-color: var(--faint);
+}
+
+.field__input:focus-visible {
+  outline: none;
+  border-color: var(--stamp);
+  box-shadow: 0 0 0 3px var(--stamp-tint);
+}
+
+.field__input--amount {
+  min-height: 72px;
+  font-family: var(--font-mono);
+  font-size: clamp(1.75rem, 1.2rem + 2vw, 2.5rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.field__hint {
+  font-size: var(--step--1);
+  color: var(--muted);
+}
+
+.field__hint--error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* ---------- surfaces ---------- */
+
+.card {
+  background: var(--card);
+  border-radius: var(--r-card);
+  padding: var(--s5);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 var(--s3);
+  border-radius: var(--r-pill);
+  font-size: var(--step--1);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+.chip--cleared {
+  background: var(--stamp-tint);
+  color: var(--stamp);
+}
+
+.chip--waiting {
+  background: color-mix(in srgb, var(--yellow) 30%, transparent);
+  color: var(--ink);
+}
+
+.chip--closed {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  color: var(--muted);
+}
+
+.chip--danger {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* ---------- app chrome ---------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s4);
+  flex-wrap: wrap;
+  padding: var(--s4) clamp(16px, 4vw, 40px);
+}
+
+.topbar__nav {
+  display: flex;
+  gap: var(--s1);
+  flex-wrap: wrap;
+}
+
+.topbar__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 var(--s4);
+  border-radius: var(--r-pill);
+  font-size: var(--step--1);
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--muted);
+  transition: background-color var(--t-micro) var(--ease-out), color var(--t-micro) var(--ease-out);
+}
+
+.topbar__link:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+.topbar__link[aria-current='page'] {
+  color: var(--graphite);
+  background: var(--yellow);
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: var(--step-1);
+  letter-spacing: -0.02em;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.logo:hover {
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
