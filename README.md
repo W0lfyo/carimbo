@@ -76,6 +76,11 @@ At the till, the shop can choose **Trustless Work escrow** instead of the native
 | Refusal | `dispute-escrow` → `resolve-dispute` back to the shop | customs (dispute resolver) |
 | Conversion | Stellar DEX path payment, USDC → the traveller's currency | the traveller |
 
+**On-chain evidence**, one refund through Trustless Work (Casa Verde, €37.40 of VAT escrowed as 43.38 USDC):
+
+1. Customs approves the milestone and releases the escrow, 43.03 USDC reach the traveller: [`081e4980…2ba9`](https://stellar.expert/explorer/testnet/tx/081e4980b4b1e427425124ec754a3c307fc94bc0a9bbb31cef599fd668952ba9)
+2. The DEX converts them, the traveller holds **$42.77**: [`3edbc41b…dc1c`](https://stellar.expert/explorer/testnet/tx/3edbc41bbb512a9e4096a29fcf0a7684f2dc1dd80be9d32d3688e3790acddc1c)
+
 Their Testnet API holds Circle's **USDC**, so on this path the VAT is escrowed in USDC at the reference rate. Carimbo's 0.5% goes to the platform role; Trustless Work takes its own protocol fee. The phone follows the escrow through Trustless Work's indexer (`get-escrow-by-contract-ids`).
 
 ### Testnet deployment
