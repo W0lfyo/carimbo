@@ -31,6 +31,7 @@ export interface Claim {
   travellerId?: string;
   payout?: Payout;
   balanceId?: string; // the claimable balance holding the VAT on Stellar
+  archived?: boolean; // hidden from the traveller once she starts a new trip
   lines?: { item: string; paidMinor: number; vatRate: number; vatMinor: number }[]; // receipt lines
 }
 

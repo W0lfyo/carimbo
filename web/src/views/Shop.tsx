@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ledger, useLedger } from '../lib/ledger';
-import { CURRENCIES, fmt, parseAmount, shortDate, vatFromGross } from '../lib/money';
+import { CURRENCIES, MAX_EUR_MINOR, convert, fmt, inputAmount, parseAmount, shortDate, vatFromGross, type Code } from '../lib/money';
 import { COUNTRIES, countryOf, detectCountry, ruleText } from '../lib/countries';
 import type { Claim, ClaimStatus } from '../lib/types';
 import { QR } from '../components/QR';
@@ -35,8 +35,18 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
   const [locking, setLocking] = useState(false);
   const [failure, setFailure] = useState('');
 
-  // A new country brings its own standard rate.
-  useEffect(() => setLines((ls) => ls.map((l) => ({ ...l, rate: country.rates[0].rate }))), [country.code]);
+  // A new country brings its own standard rate, and prices are converted into its currency.
+  const prevCur = useRef<Code>(cur);
+  useEffect(() => {
+    const from = prevCur.current;
+    prevCur.current = cur;
+    setLines((ls) =>
+      ls.map((l) => {
+        const minor = parseAmount(l.amount);
+        return { ...l, rate: country.rates[0].rate, amount: minor && from !== cur ? inputAmount(convert(minor, from, cur), cur) : l.amount };
+      }),
+    );
+  }, [country.code, country.rates, cur]);
 
   const parsed = lines.map((l) => {
     const minor = parseAmount(l.amount);
@@ -47,8 +57,10 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
   const invalid = parsed.some((l) => l.invalid);
   const incomplete = parsed.some((l) => !l.minor || !l.item.trim());
   const tooSmall = total > 0 && total < country.minPurchase;
-  const minText = country.minPurchase > 0 ? `the ${fmt(country.minPurchase, cur)} minimum` : 'no minimum purchase';
-  const canLock = !invalid && !incomplete && !tooSmall && total > 0;
+  const maxLocal = convert(MAX_EUR_MINOR, 'EUR', cur);
+  const tooBig = total > maxLocal;
+  const minText = country.minPurchase > 0 ? `Meets the ${fmt(country.minPurchase, cur)} minimum.` : `No minimum purchase in ${country.name}.`;
+  const canLock = !invalid && !incomplete && !tooSmall && !tooBig && total > 0;
 
   const update = (id: number, patch: Partial<BasketLine>) => setLines((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)));
   const addLine = () => setLines((ls) => [...ls, { id: Math.max(...ls.map((l) => l.id)) + 1, item: '', amount: '', rate: country.rates[0].rate }]);
@@ -113,6 +125,24 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
       )}
 
       <div className="desk__grid">
+        {compact && live ? (
+          <section className="card sale receipt-card" aria-label={`Receipt ${live.code}`}>
+            <h2 className="subtitle">Receipt {live.code.slice(-3)}</h2>
+            <ul className="receipt-lines">
+              {(live.lines ?? [{ item: live.item, paidMinor: live.paidCents, vatRate: live.vatRate, vatMinor: live.vatCents }]).map((l, i) => (
+                <li key={i}>
+                  <span>{l.item}</span>
+                  <span className="muted small">VAT {l.vatRate}%</span>
+                  <span className="mono">{fmt(l.paidMinor, live.currency)}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="sale__total">
+              <span>VAT set aside for the traveller</span>
+              <span className="mono sale__vat">{fmt(live.vatCents, live.currency)}</span>
+            </div>
+          </section>
+        ) : (
         <form
           className="card sale"
           onSubmit={(e) => {
@@ -182,18 +212,21 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
             <span>VAT set aside for the traveller</span>
             <span className="mono sale__vat">{fmt(vat, cur)}</span>
           </div>
-          <p id="sale-hint" className={`field__hint${invalid || tooSmall ? ' field__hint--error' : ''}`}>
+          <p id="sale-hint" className={`field__hint${invalid || tooSmall || tooBig ? ' field__hint--error' : ''}`}>
             {invalid
-              ? `Type each price in ${CURRENCIES[cur].name}, like 400 or 400.50.`
-              : tooSmall
-                ? `Tax-free in ${country.name} needs at least ${fmt(country.minPurchase, cur)} on one receipt.`
-                : `Meets ${minText}. For visitors living ${country.zone}: ${ruleText(country.exportRule)}.`}
+              ? `Type each price in ${CURRENCIES[cur].name} as a positive number, like 400 or 400.50.`
+              : tooBig
+                ? `A single receipt is capped at ${fmt(maxLocal, cur)}. Split the sale or check the price.`
+                : tooSmall
+                  ? `Tax-free in ${country.name} needs at least ${fmt(country.minPurchase, cur)} on one receipt.`
+                  : `${minText} For visitors living ${country.zone}: ${ruleText(country.exportRule)}.`}
           </p>
           <button type="submit" className="btn btn--go btn--block btn--big" disabled={!canLock || locking}>
             {locking ? 'Locking VAT on Stellar…' : 'Lock VAT and show QR'}
           </button>
           {failure && <p className="field__hint field__hint--error">{failure}</p>}
         </form>
+        )}
 
         <section className="card handoff" aria-live="polite">
           {live ? (

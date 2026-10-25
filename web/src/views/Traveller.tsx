@@ -29,8 +29,9 @@ export function Traveller({ joinCode }: { joinCode?: string }) {
   const [busy, setBusy] = useState(false);
   const [typed, setTyped] = useState('');
   const [error, setError] = useState('');
+  const [cashout, setCashout] = useState(false);
 
-  const mine = s.claims.filter((c) => c.travellerId === t.id).sort((a, b) => a.createdAt - b.createdAt);
+  const mine = s.claims.filter((c) => c.travellerId === t.id && !c.archived).sort((a, b) => a.createdAt - b.createdAt);
   const open = mine.filter((c) => c.status === 'locked');
   const paid = mine.filter((c) => c.status === 'refunded');
   const rejected = mine.filter((c) => c.status === 'rejected');
@@ -134,16 +135,32 @@ export function Traveller({ joinCode }: { joinCode?: string }) {
           </div>
         </dl>
         <div className="grow" />
-        <button type="button" className="btn btn--go btn--block">
-          Send to my bank card
-        </button>
+        {cashout ? (
+          <div className="cashout" role="region" aria-label="Cash out">
+            <strong>Cash out through a Stellar anchor</strong>
+            <p className="small muted">
+              Your {CURRENCIES[p.currency].name.toLowerCase()} sit in your Stellar account. Anchors such as MoneyGram turn them into a bank transfer or cash in 170+ countries, using the SEP-24 standard.
+              This demo runs on Testnet money, so the payout stops here.
+            </p>
+            <button type="button" className="btn btn--line btn--small" onClick={() => setCashout(false)}>
+              Close
+            </button>
+          </div>
+        ) : (
+          <button type="button" className="btn btn--go btn--block" onClick={() => setCashout(true)}>
+            Send to my bank card
+          </button>
+        )}
         {p.tx ? (
           <a className="textlink" href={txUrl(p.tx)} target="_blank" rel="noreferrer">
             See the transaction on Stellar
           </a>
         ) : (
-          <span className="textlink muted">Simulated refund, no Stellar transaction</span>
+          <span className="textlink muted">Demo mode: simulated refund</span>
         )}
+        <button type="button" className="textlink linklike" onClick={() => ledger.newTrip()}>
+          Start a new trip
+        </button>
       </div>
     );
   }
@@ -215,7 +232,7 @@ export function Traveller({ joinCode }: { joinCode?: string }) {
         <LogoMark />
         <span>Carimbo</span>
       </div>
-      <h1 className="headline">{rejected.length ? 'Customs did not clear this trip.' : 'Shopping in Lisbon?'}</h1>
+      <h1 className="headline">{rejected.length ? 'Customs did not clear this trip.' : 'Shopping abroad?'}</h1>
       <p className="lede">
         {rejected.length
           ? 'The VAT went back to the shops. Ask the customs officer what was missing, or contact the shop.'

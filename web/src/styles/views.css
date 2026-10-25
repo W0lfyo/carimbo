@@ -726,6 +726,10 @@
   color: var(--muted);
 }
 
+.demo__controls .btn--go {
+  min-width: 15rem; /* the label changes while playing; the layout must not move */
+}
+
 .demo__controls {
   display: flex;
   gap: var(--s3);
@@ -934,4 +938,43 @@
   padding: var(--s3);
   font-size: 12px;
   resize: vertical;
+}
+
+.cashout {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s2);
+  padding: var(--s4);
+  border-radius: 16px;
+  background: var(--card);
+  animation: rise var(--t-move) var(--ease-out) both;
+}
+
+.linklike {
+  border: 0;
+  background: none;
+  padding: var(--s1);
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.receipt-lines {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.receipt-lines li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: var(--s3);
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--line);
+  animation: rise var(--t-move) var(--ease-out) both;
 }

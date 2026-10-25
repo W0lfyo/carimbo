@@ -84,10 +84,25 @@ export function clock(ms: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
 }
 
-/** Parse "400", "400.5", "400,50", "€400.00", "12 400" into minor units. Null when not a positive amount. */
+/** Largest receipt we accept: one million euros, in any currency. */
+export const MAX_EUR_MINOR = 100_000_000;
+
+/**
+ * Parse a typed price into minor units. Accepts "400", "400.50", "400,50", "12,400",
+ * "12 400" and a leading currency symbol; rejects signs, exponents and anything else.
+ */
 export function parseAmount(input: string): number | null {
-  const cleaned = input.replace(/[^\d.,]/g, '').replace(',', '.');
-  if (!/^\d+(\.\d{0,2})?$/.test(cleaned)) return null;
-  const minor = Math.round(parseFloat(cleaned) * 100);
+  const t = input.trim().replace(/^(€|\$|£|¥|₩|CHF|S\$|CN¥|R\$)\s*/, '').replace(/\s/g, '');
+  let normalized: string;
+  if (/^\d{1,3}(,\d{3})+(\.\d{1,2})?$/.test(t)) normalized = t.replace(/,/g, ''); // 12,400.50
+  else if (/^\d+([.,]\d{1,2})?$/.test(t)) normalized = t.replace(',', '.'); // 400 / 400.5 / 400,50
+  else return null;
+  const minor = Math.round(parseFloat(normalized) * 100);
   return minor > 0 ? minor : null;
+}
+
+/** Plain digits for an input field, e.g. 40000 → "400.00", ¥ → "36000". */
+export function inputAmount(minor: number, code: Code): string {
+  const v = minor / 100;
+  return CURRENCIES[code].decimals === 0 ? String(Math.round(v)) : v.toFixed(2);
 }

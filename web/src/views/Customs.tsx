@@ -33,9 +33,22 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
   const lastStamp = s.stampedAt && Date.now() - s.stampedAt < 60_000 && open.length === 0 ? s.stampedAt : undefined;
   const showDossier = open.length > 0 && (opened || compact);
 
+  const [lookupMsg, setLookupMsg] = useState('');
+
   function lookUp(e: React.FormEvent) {
     e.preventDefault();
-    if (typed.trim().toUpperCase() === t.tripCode) setOpened(true);
+    const q = typed.trim().toUpperCase();
+    const claim = s.claims.find((c) => c.code === q);
+    const isTrip = q === t.tripCode || (claim?.travellerId === t.id && claim.status === 'locked');
+    if (isTrip && open.length > 0) {
+      setOpened(true);
+      setLookupMsg('');
+    } else if (q === t.tripCode) setLookupMsg('This trip has no open claims: everything on it was already handled.');
+    else if (!claim) setLookupMsg('No claim or trip matches this code. Check it on the traveller’s screen.');
+    else if (claim.status === 'refunded') setLookupMsg(`Already cleared on ${shortDate(claim.payout?.at ?? claim.createdAt)}. Nothing left to stamp.`);
+    else if (claim.status === 'rejected') setLookupMsg('This claim was refused earlier and its VAT went back to the shop.');
+    else if (claim.status === 'reclaimed') setLookupMsg('The export deadline passed: the shop has taken this VAT back.');
+    else setLookupMsg('The traveller has not added this claim to her phone yet.');
   }
 
   return (
@@ -69,9 +82,25 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
             )}
             <form className="stack-2" onSubmit={lookUp}>
               <label className="field">
-                <span className="field__label">Or enter an airport code</span>
-                <input className="field__input mono" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="CRB-XXXX-XXX" autoComplete="off" spellCheck={false} />
+                <span className="field__label">Or enter a trip or claim code</span>
+                <input
+                  className="field__input mono"
+                  value={typed}
+                  onChange={(e) => {
+                    setTyped(e.target.value);
+                    setLookupMsg('');
+                  }}
+                  placeholder="CRB-XXXX-XXX"
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-describedby="lookup-msg"
+                />
               </label>
+              {lookupMsg && (
+                <p id="lookup-msg" className="field__hint field__hint--error" role="status">
+                  {lookupMsg}
+                </p>
+              )}
               <button className="btn btn--line btn--small" type="submit" disabled={!typed.trim()}>
                 Open claim
               </button>

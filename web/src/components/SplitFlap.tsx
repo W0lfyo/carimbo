@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-const GLYPHS = '0123456789$€£¥.,ABCDEFGHJKLMNPRSTUVWXYZ';
+const DIGITS = '0123456789';
 
 function reducedMotion(): boolean {
   try {
@@ -50,10 +50,11 @@ export function SplitFlap({ value, from, play = true, delay = 0, size = 'lg', la
       timer.current = window.setInterval(() => {
         step += 1;
         setChars((prev) =>
-          prev.map((c, i) => {
+          prev.map((_c, i) => {
             if (step >= settleAt[i]) return target[i];
-            if (target[i] === ' ' && c === ' ') return ' ';
-            return GLYPHS[(Math.random() * GLYPHS.length) | 0];
+            // Only digits roll; symbols and separators snap straight to their final value.
+            if (!/\d/.test(target[i])) return target[i];
+            return DIGITS[(Math.random() * DIGITS.length) | 0];
           }),
         );
         setTicks((prev) => prev.map((t, i) => (step <= settleAt[i] ? t + 1 : t)));

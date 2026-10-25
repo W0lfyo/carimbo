@@ -224,7 +224,22 @@ export const ledger = {
     const mine = state.claims.filter((c) => c.travellerId === t.id && c.status === 'locked');
     if (mine.length === 0) return;
     const started = Date.now();
-    const net = (c: Claim) => c.vatCents - feeOf(c.vatCents);
+    // The fee is 0.5% of each currency group's total (exactly what the release transaction
+    // pays), shared across its claims so the parts add up to the whole.
+    const feeShare = new Map<string, number>();
+    const byCur = new Map<CurrencyCode, Claim[]>();
+    mine.forEach((c) => byCur.set(c.currency, [...(byCur.get(c.currency) ?? []), c]));
+    for (const list of byCur.values()) {
+      const total = list.reduce((n, c) => n + c.vatCents, 0);
+      const fee = feeOf(total);
+      let left = fee;
+      list.forEach((c, i) => {
+        const part = i === list.length - 1 ? left : Math.floor((fee * c.vatCents) / total);
+        left -= part;
+        feeShare.set(c.id, part);
+      });
+    }
+    const net = (c: Claim) => c.vatCents - (feeShare.get(c.id) ?? 0);
 
     // One atomic Stellar transaction: claim, fee, DEX conversion, payout.
     let releaseTx: string | undefined;
@@ -261,7 +276,7 @@ export const ledger = {
         payout: {
           currency: t.currency,
           rate: onChain ? effective.get(c.currency) ?? rateBetween(c.currency, t.currency) : rateBetween(c.currency, t.currency),
-          feeCents: feeOf(c.vatCents),
+          feeCents: feeShare.get(c.id) ?? 0,
           amountMinor: received.get(c.id) ?? 0,
           seconds: onChain ? seconds : 4 + Math.round(Math.random() * 2),
           at: now,
@@ -309,6 +324,16 @@ export const ledger = {
       ...state,
       claims: state.claims.map((c) => (c.id === claimId ? { ...c, status: 'reclaimed' } : c)),
       activity: [activity('reclaim', `Deadline passed, ${shop?.name ?? 'shop'} took its VAT back`, fmt(claim.vatCents, claim.currency), tx), ...state.activity],
+    });
+  },
+
+  /** The traveller closes a finished trip: past claims leave her screen. */
+  newTrip() {
+    const t = state.traveller;
+    commit({
+      ...state,
+      stampedAt: undefined,
+      claims: state.claims.map((c) => (c.travellerId === t.id && c.status !== 'locked' ? { ...c, archived: true } : c)),
     });
   },
 

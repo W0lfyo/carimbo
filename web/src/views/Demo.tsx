@@ -9,9 +9,9 @@ import { Traveller } from './Traveller';
 type Stage = 'idle' | 'shop' | 'traveller' | 'customs' | 'paid';
 
 const STEPS: { stage: Stage; label: string }[] = [
-  { stage: 'shop', label: 'Shop locks the VAT' },
-  { stage: 'traveller', label: 'Traveller adds it' },
-  { stage: 'customs', label: 'Customs stamps' },
+  { stage: 'shop', label: 'Shops lock the VAT' },
+  { stage: 'traveller', label: 'Traveller adds each receipt' },
+  { stage: 'customs', label: 'Customs stamps once' },
   { stage: 'paid', label: 'Paid in dollars' },
 ];
 
@@ -23,9 +23,24 @@ export function Demo() {
   const [playing, setPlaying] = useState(false);
   const [joinCode, setJoinCode] = useState<string | undefined>();
   const [failure, setFailure] = useState('');
+  const [paneShop, setPaneShop] = useState('loja-azul');
   const run = useRef(0);
+  const panes = useRef<Record<string, HTMLElement | null>>({});
 
   useEffect(() => () => void (run.current += 1), []);
+
+  // Keep the active pane in view while the story plays.
+  useEffect(() => {
+    if (!playing && stage !== 'paid') return;
+    const key = stage === 'paid' ? 'traveller' : stage;
+    let smooth = true;
+    try {
+      smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch {
+      /* ignore */
+    }
+    panes.current[key]?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'center' });
+  }, [stage, playing]);
 
   async function play() {
     setFailure('');
@@ -43,9 +58,11 @@ export function Demo() {
     setPlaying(true);
     ledger.reset();
     setJoinCode(undefined);
+    setPaneShop('loja-azul');
     setStage('shop');
     await wait(900);
     if (!alive()) return;
+    // First shop: two items on one receipt.
     const a = await ledger.createSale('loja-azul', [
       { item: 'Leather bag', paidMinor: 32000, vatRate: 23 },
       { item: 'Cork wallet', paidMinor: 8000, vatRate: 23 },
@@ -54,14 +71,27 @@ export function Demo() {
     await wait(1600);
     if (!alive()) return;
     setStage('traveller');
-    await wait(1400);
+    await wait(1200);
     if (!alive()) return;
     await ledger.join(a.code);
+    setJoinCode(undefined);
+    await wait(1400);
+    if (!alive()) return;
+    // Second shop, same trip.
+    setPaneShop('casa-verde');
+    setStage('shop');
+    await wait(900);
     if (!alive()) return;
     const b = await ledger.createSale('casa-verde', [{ item: 'Ceramics set', paidMinor: 20000, vatRate: 23 }]);
+    setJoinCode(b.code);
+    await wait(1600);
+    if (!alive()) return;
+    setStage('traveller');
+    await wait(1200);
+    if (!alive()) return;
     await ledger.join(b.code);
     setJoinCode(undefined);
-    await wait(2200);
+    await wait(2000);
     if (!alive()) return;
     setStage('customs');
     await wait(1800);
@@ -75,6 +105,7 @@ export function Demo() {
     run.current += 1;
     ledger.reset();
     setJoinCode(undefined);
+    setPaneShop('loja-azul');
     setStage('idle');
     setPlaying(false);
   }
@@ -122,13 +153,13 @@ export function Demo() {
       )}
 
       <div className="stage">
-        <section className={`stage__pane${stage === 'shop' ? ' stage__pane--lit' : ''}`} aria-labelledby="pane-shop">
+        <section ref={(el) => void (panes.current.shop = el)} className={`stage__pane${stage === 'shop' ? ' stage__pane--lit' : ''}`} aria-labelledby="pane-shop">
           <h2 className="stage__label" id="pane-shop">
-            Shop till, Loja Azul
+            Shop till, {s.shops.find((x) => x.id === paneShop)?.name}
           </h2>
-          <ShopView compact />
+          <ShopView key={paneShop} initialShop={paneShop} compact />
         </section>
-        <section className={`stage__pane stage__pane--phone${stage === 'traveller' || stage === 'paid' ? ' stage__pane--lit' : ''}`} aria-labelledby="pane-traveller">
+        <section ref={(el) => void (panes.current.traveller = el)} className={`stage__pane stage__pane--phone${stage === 'traveller' || stage === 'paid' ? ' stage__pane--lit' : ''}`} aria-labelledby="pane-traveller">
           <h2 className="stage__label" id="pane-traveller">
             Traveller’s phone
           </h2>
@@ -136,7 +167,7 @@ export function Demo() {
             <Traveller joinCode={joinCode} />
           </div>
         </section>
-        <section className={`stage__pane${stage === 'customs' ? ' stage__pane--lit' : ''}`} aria-labelledby="pane-customs">
+        <section ref={(el) => void (panes.current.customs = el)} className={`stage__pane${stage === 'customs' ? ' stage__pane--lit' : ''}`} aria-labelledby="pane-customs">
           <h2 className="stage__label" id="pane-customs">
             Customs desk, LIS T1
           </h2>
@@ -155,7 +186,7 @@ export function Demo() {
               Live on Stellar Testnet
             </span>
           ) : (
-            <span className="chip">Simulated: Testnet contract not configured</span>
+            <span className="chip">Demo mode: simulated transactions</span>
           )}
         </div>
         {s.activity.length === 0 ? (
