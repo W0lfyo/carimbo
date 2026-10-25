@@ -152,11 +152,15 @@ export function useLedger(): LedgerState {
 export const ledger = {
   get: () => state,
 
-  async createSale(shopId: string, item: string, paidMinor: number, vatRate: number): Promise<Claim> {
+  async createSale(shopId: string, items: { item: string; paidMinor: number; vatRate: number }[]): Promise<Claim> {
     const now = Date.now();
     const shop = state.shops.find((s) => s.id === shopId)!;
     const country = countryOf(shop.country);
-    const vat = vatFromGross(paidMinor, vatRate, country.currency);
+    const lines = items.map((l) => ({ ...l, vatMinor: vatFromGross(l.paidMinor, l.vatRate, country.currency) }));
+    const vat = lines.reduce((n, l) => n + l.vatMinor, 0);
+    const paidMinor = lines.reduce((n, l) => n + l.paidMinor, 0);
+    const item = lines.length > 1 ? `${lines[0].item} + ${lines.length - 1} more` : lines[0].item;
+    const vatRate = lines[0].vatRate;
     const deadline = exportDeadline(new Date(now), country.exportRule);
     let balanceId: string | undefined;
     let tx: string | undefined;
@@ -180,6 +184,7 @@ export const ledger = {
       deadline,
       status: 'locked',
       balanceId,
+      lines,
     };
     commit({
       ...state,
@@ -236,11 +241,13 @@ export const ledger = {
 
     // Share each currency group's converted amount across its claims.
     const received = new Map<string, number>();
+    const effective = new Map<CurrencyCode, number>();
     const groups = new Map<CurrencyCode, Claim[]>();
     mine.forEach((c) => groups.set(c.currency, [...(groups.get(c.currency) ?? []), c]));
     for (const [cur, list] of groups) {
       const sent = list.reduce((n, c) => n + net(c), 0);
       const got = chainReceived?.get(cur) ?? convert(sent, cur, t.currency);
+      effective.set(cur, Math.round((got / sent) * 10_000) / 10_000);
       list.forEach((c) => received.set(c.id, Math.round((got * net(c)) / sent)));
     }
 
@@ -253,11 +260,12 @@ export const ledger = {
         status: 'refunded',
         payout: {
           currency: t.currency,
-          rate: rateBetween(c.currency, t.currency),
+          rate: onChain ? effective.get(c.currency) ?? rateBetween(c.currency, t.currency) : rateBetween(c.currency, t.currency),
           feeCents: feeOf(c.vatCents),
           amountMinor: received.get(c.id) ?? 0,
           seconds: onChain ? seconds : 4 + Math.round(Math.random() * 2),
           at: now,
+          tx: releaseTx,
         },
       });
     }

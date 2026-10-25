@@ -31,6 +31,7 @@ export interface Claim {
   travellerId?: string;
   payout?: Payout;
   balanceId?: string; // the claimable balance holding the VAT on Stellar
+  lines?: { item: string; paidMinor: number; vatRate: number; vatMinor: number }[]; // receipt lines
 }
 
 export interface Payout {
@@ -40,6 +41,7 @@ export interface Payout {
   amountMinor: number; // in the payout currency, 2 decimals (JPY shown without)
   seconds: number;
   at: number;
+  tx?: string; // Stellar transaction that paid the traveller
 }
 
 export interface Traveller {

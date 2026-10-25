@@ -12,6 +12,13 @@ const STATUS: Record<ClaimStatus, { label: string; tone: string }> = {
   reclaimed: { label: 'Expired, VAT returned', tone: 'closed' },
 };
 
+interface BasketLine {
+  id: number;
+  item: string;
+  amount: string;
+  rate: number;
+}
+
 export function joinUrl(code: string): string {
   return `${location.origin}${location.pathname}#/traveller?join=${code}`;
 }
@@ -19,25 +26,32 @@ export function joinUrl(code: string): string {
 export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: string; compact?: boolean }) {
   const s = useLedger();
   const shop = s.shops.find((x) => x.id === shopId)!;
-  const [amount, setAmount] = useState('400.00');
-  const [item, setItem] = useState('Leather bag');
   const country = countryOf(shop.country);
   const cur = country.currency;
   const detected = detectCountry().code;
-  const [rate, setRate] = useState(country.rates[0].rate);
+  const [lines, setLines] = useState<BasketLine[]>(() => [{ id: 1, item: 'Leather bag', amount: '400.00', rate: country.rates[0].rate }]);
   const [current, setCurrent] = useState<Claim | null>(null);
   const [locking, setLocking] = useState(false);
   const [failure, setFailure] = useState('');
 
   // A new country brings its own standard rate.
-  useEffect(() => setRate(country.rates[0].rate), [country.code]);
+  useEffect(() => setLines((ls) => ls.map((l) => ({ ...l, rate: country.rates[0].rate }))), [country.code]);
 
-  const cents = parseAmount(amount);
-  const vat = cents ? vatFromGross(cents, rate, cur) : 0;
-  const tooSmall = cents !== null && cents < country.minPurchase;
-  const minText = country.minPurchase > 0 ? `the ${fmt(country.minPurchase, cur)} minimum` : 'no minimum purchase'
-  const invalid = amount.trim() !== '' && cents === null;
-  const canLock = !!cents && !tooSmall && item.trim().length > 0;
+  const parsed = lines.map((l) => {
+    const minor = parseAmount(l.amount);
+    return { ...l, minor, vat: minor ? vatFromGross(minor, l.rate, cur) : 0, invalid: l.amount.trim() !== '' && minor === null };
+  });
+  const total = parsed.reduce((n, l) => n + (l.minor ?? 0), 0);
+  const vat = parsed.reduce((n, l) => n + l.vat, 0);
+  const invalid = parsed.some((l) => l.invalid);
+  const incomplete = parsed.some((l) => !l.minor || !l.item.trim());
+  const tooSmall = total > 0 && total < country.minPurchase;
+  const minText = country.minPurchase > 0 ? `the ${fmt(country.minPurchase, cur)} minimum` : 'no minimum purchase';
+  const canLock = !invalid && !incomplete && !tooSmall && total > 0;
+
+  const update = (id: number, patch: Partial<BasketLine>) => setLines((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  const addLine = () => setLines((ls) => [...ls, { id: Math.max(...ls.map((l) => l.id)) + 1, item: '', amount: '', rate: country.rates[0].rate }]);
+  const removeLine = (id: number) => setLines((ls) => (ls.length > 1 ? ls.filter((l) => l.id !== id) : ls));
 
   const sales = s.claims.filter((c) => c.shopId === shopId);
   // In the demo stage, sales can be created by the story player: show the newest one.
@@ -80,43 +94,66 @@ export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: s
           className="card sale"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!canLock || !cents || locking) return;
+            if (!canLock || locking) return;
             setLocking(true);
             setFailure('');
             ledger
-              .createSale(shopId, item.trim(), cents, rate)
+              .createSale(
+                shopId,
+                parsed.map((l) => ({ item: l.item.trim(), paidMinor: l.minor!, vatRate: l.rate })),
+              )
               .then(setCurrent)
               .catch((err: Error) => setFailure(`The escrow did not accept the sale: ${err.message}`))
               .finally(() => setLocking(false));
           }}
         >
           <h2 className="subtitle">New tax-free sale</h2>
-          <label className="field">
-            <span className="field__label">Paid, VAT included, in {CURRENCIES[cur].name}</span>
-            <input
-              className="field__input field__input--amount"
-              inputMode="decimal"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              aria-invalid={invalid || tooSmall}
-              aria-describedby="sale-hint"
-            />
-          </label>
-          <div className="sale__row">
-            <label className="field">
-              <span className="field__label">Item</span>
-              <input className="field__input" value={item} onChange={(e) => setItem(e.target.value)} />
-            </label>
-            <label className="field">
-              <span className="field__label">VAT rate</span>
-              <select className="field__input" value={rate} onChange={(e) => setRate(Number(e.target.value))}>
-                {country.rates.map((r) => (
-                  <option key={r.rate} value={r.rate}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <ul className="basket" aria-label="Items on the receipt">
+            {parsed.map((l, i) => (
+              <li key={l.id} className="basket__line">
+                <label className="field basket__item">
+                  <span className="field__label">Item {lines.length > 1 ? i + 1 : ''}</span>
+                  <input className="field__input" value={l.item} placeholder="What was sold" onChange={(e) => update(l.id, { item: e.target.value })} />
+                </label>
+                <label className="field basket__amount">
+                  <span className="field__label">Price, VAT incl.</span>
+                  <input
+                    className="field__input mono"
+                    inputMode="decimal"
+                    value={l.amount}
+                    placeholder="0.00"
+                    onChange={(e) => update(l.id, { amount: e.target.value })}
+                    aria-invalid={l.invalid}
+                  />
+                </label>
+                <label className="field basket__rate">
+                  <span className="field__label">VAT category</span>
+                  <select className="field__input" value={l.rate} onChange={(e) => update(l.id, { rate: Number(e.target.value) })}>
+                    {country.rates.map((r) => (
+                      <option key={r.rate} value={r.rate}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {lines.length > 1 && (
+                  <button type="button" className="basket__remove" onClick={() => removeLine(l.id)} aria-label={`Remove ${l.item || 'this item'}`}>
+                    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+          <button type="button" className="btn btn--line btn--small basket__add" onClick={addLine}>
+            + Add an item
+          </button>
+          <div className="sale__sum">
+            <span className="muted">
+              {lines.length} {lines.length > 1 ? 'items' : 'item'}, paid in {CURRENCIES[cur].name}
+            </span>
+            <span className="mono">{fmt(total, cur)}</span>
           </div>
           <div className="sale__total">
             <span>VAT set aside for the traveller</span>
@@ -124,9 +161,9 @@ export function ShopView({ shopId = 'loja-azul', compact = false }: { shopId?: s
           </div>
           <p id="sale-hint" className={`field__hint${invalid || tooSmall ? ' field__hint--error' : ''}`}>
             {invalid
-              ? `Type an amount in ${CURRENCIES[cur].name}, like 400 or 400.50.`
+              ? `Type each price in ${CURRENCIES[cur].name}, like 400 or 400.50.`
               : tooSmall
-                ? `Tax-free in ${country.name} needs at least ${fmt(country.minPurchase, cur)} spent in your shop today.`
+                ? `Tax-free in ${country.name} needs at least ${fmt(country.minPurchase, cur)} on one receipt.`
                 : `Meets ${minText}. For visitors living ${country.zone}: ${ruleText(country.exportRule)}.`}
           </p>
           <button type="submit" className="btn btn--go btn--block btn--big" disabled={!canLock || locking}>

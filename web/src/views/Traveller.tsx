@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ledger, useLedger } from '../lib/ledger';
 import { CURRENCIES, PAYOUT_CURRENCIES, convert, fmt, fmtBare, fmtPlain } from '../lib/money';
 import { countryOf } from '../lib/countries';
+import { txUrl } from '../lib/stellar';
 import type { CurrencyCode } from '../lib/types';
 import { LogoMark } from '../components/Logo';
 import { BoardingPass } from '../components/BoardingPass';
@@ -136,9 +137,13 @@ export function Traveller({ joinCode }: { joinCode?: string }) {
         <button type="button" className="btn btn--go btn--block">
           Send to my bank card
         </button>
-        <a className="textlink" href="#/demo">
-          See the transaction on Stellar
-        </a>
+        {p.tx ? (
+          <a className="textlink" href={txUrl(p.tx)} target="_blank" rel="noreferrer">
+            See the transaction on Stellar
+          </a>
+        ) : (
+          <span className="textlink muted">Simulated refund, no Stellar transaction</span>
+        )}
       </div>
     );
   }

@@ -46,7 +46,10 @@ export function Demo() {
     setStage('shop');
     await wait(900);
     if (!alive()) return;
-    const a = await ledger.createSale('loja-azul', 'Leather bag', 40000, 23);
+    const a = await ledger.createSale('loja-azul', [
+      { item: 'Leather bag', paidMinor: 32000, vatRate: 23 },
+      { item: 'Cork wallet', paidMinor: 8000, vatRate: 23 },
+    ]);
     setJoinCode(a.code);
     await wait(1600);
     if (!alive()) return;
@@ -55,7 +58,7 @@ export function Demo() {
     if (!alive()) return;
     await ledger.join(a.code);
     if (!alive()) return;
-    const b = await ledger.createSale('casa-verde', 'Ceramics set', 20000, 23);
+    const b = await ledger.createSale('casa-verde', [{ item: 'Ceramics set', paidMinor: 20000, vatRate: 23 }]);
     await ledger.join(b.code);
     setJoinCode(undefined);
     await wait(2200);
