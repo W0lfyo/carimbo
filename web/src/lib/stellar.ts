@@ -61,7 +61,8 @@ export async function loadConfig(): Promise<ChainConfig | null> {
   }
   // A fresh deployment made from this browser wins; the same deployment picks up
   // accounts added to chain.json since (new shops).
-  if (local && shared && local.issuer === shared.issuer) config = { ...local, accounts: { ...local.accounts, ...shared.accounts } };
+  if (local && shared && local.issuer === shared.issuer)
+    config = { ...local, trustlessWork: shared.trustlessWork ?? local.trustlessWork, accounts: { ...local.accounts, ...shared.accounts } };
   else config = local ?? shared;
   return config;
 }
