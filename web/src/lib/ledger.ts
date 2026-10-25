@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { Activity, ActivityKind, Claim, CurrencyCode, LedgerState } from './types';
 import { convert, feeOf, fmt, rateBetween, vatFromGross } from './money';
-import { chainAttach, chainConvert, chainOpen, chainReclaim, chainRelease, chainReject, getConfig, type Role } from './stellar';
+import { chainAttach, chainOpen, chainReclaim, chainRelease, chainReject, getConfig, type Role } from './stellar';
 import { countryOf, exportDeadline } from './countries';
 
 /**
@@ -158,11 +158,11 @@ export const ledger = {
     const country = countryOf(shop.country);
     const vat = vatFromGross(paidMinor, vatRate, country.currency);
     const deadline = exportDeadline(new Date(now), country.exportRule);
-    let chainId: number | undefined;
+    let balanceId: string | undefined;
     let tx: string | undefined;
     if (live()) {
       const res = await chainOpen(SHOP_ROLE[shopId], country.currency, vat, deadline);
-      chainId = res.id;
+      balanceId = res.balanceId;
       tx = res.hash;
     } else {
       await pause(350);
@@ -179,12 +179,12 @@ export const ledger = {
       createdAt: now,
       deadline,
       status: 'locked',
-      chainId,
+      balanceId,
     };
     commit({
       ...state,
       claims: [claim, ...state.claims],
-      activity: [activity('escrow', `${shop.name} locked VAT in the escrow contract`, fmt(vat, claim.currency), tx), ...state.activity],
+      activity: [activity('escrow', `${shop.name} locked the VAT in a claimable balance`, fmt(vat, claim.currency), tx), ...state.activity],
     });
     return claim;
   },
@@ -199,7 +199,7 @@ export const ledger = {
     if (!claim || claim.status !== 'locked') return null;
     if (claim.travellerId === state.traveller.id) return claim;
     let tx: string | undefined;
-    if (live() && claim.chainId !== undefined) tx = (await chainAttach(claim.chainId)).hash;
+    if (live() && claim.balanceId) tx = (await chainAttach(claim.balanceId)).hash;
     else await pause(600);
     commit({
       ...state,
@@ -221,26 +221,26 @@ export const ledger = {
     const started = Date.now();
     const net = (c: Claim) => c.vatCents - feeOf(c.vatCents);
 
+    // One atomic Stellar transaction: claim, fee, DEX conversion, payout.
     let releaseTx: string | undefined;
-    const onChain = live() && mine.every((c) => c.chainId !== undefined);
-    if (onChain) releaseTx = (await chainRelease(mine.map((c) => c.chainId!))).hash;
-    else await pause(500);
+    let chainReceived: Map<CurrencyCode, number> | undefined;
+    const onChain = live() && mine.every((c) => c.balanceId);
+    if (onChain) {
+      const res = await chainRelease(
+        mine.map((c) => ({ balanceId: c.balanceId!, currency: c.currency, vatMinor: c.vatCents })),
+        t.currency,
+      );
+      releaseTx = res.hash;
+      chainReceived = res.received;
+    } else await pause(500);
 
-    // Convert each currency group once on the DEX, then share the result across its claims.
+    // Share each currency group's converted amount across its claims.
     const received = new Map<string, number>();
-    const convertTxs: string[] = [];
     const groups = new Map<CurrencyCode, Claim[]>();
     mine.forEach((c) => groups.set(c.currency, [...(groups.get(c.currency) ?? []), c]));
     for (const [cur, list] of groups) {
       const sent = list.reduce((n, c) => n + net(c), 0);
-      let got: number;
-      if (onChain) {
-        const res = await chainConvert(cur, t.currency, sent);
-        got = res.received;
-        if (res.hash) convertTxs.push(res.hash);
-      } else {
-        got = convert(sent, cur, t.currency);
-      }
+      const got = chainReceived?.get(cur) ?? convert(sent, cur, t.currency);
       list.forEach((c) => received.set(c.id, Math.round((got * net(c)) / sent)));
     }
 
@@ -268,8 +268,8 @@ export const ledger = {
       stampedAt: now,
       claims: state.claims.map((c) => paid.get(c.id) ?? c),
       activity: [
-        activity('convert', `Converted on the Stellar DEX and paid ${t.name} in ${t.currency}`, fmt(amount, t.currency), convertTxs[0]),
-        activity('clear', `Customs signed: escrow released ${mine.length} ${mine.length > 1 ? 'claims' : 'claim'}`, fmt(totalEur, 'EUR'), releaseTx),
+        activity('convert', `Same transaction: converted on the Stellar DEX, ${t.name} paid in ${t.currency}`, fmt(amount, t.currency), releaseTx),
+        activity('clear', `Customs signed: ${mine.length} claimable ${mine.length > 1 ? 'balances' : 'balance'} released`, fmt(totalEur, 'EUR'), releaseTx),
         ...state.activity,
       ],
     });
@@ -280,7 +280,8 @@ export const ledger = {
     const mine = state.claims.filter((c) => c.travellerId === t.id && c.status === 'locked');
     if (mine.length === 0) return;
     let tx: string | undefined;
-    if (live() && mine.every((c) => c.chainId !== undefined)) tx = (await chainReject(mine.map((c) => c.chainId!))).hash;
+    if (live() && mine.every((c) => c.balanceId))
+      tx = (await chainReject(mine.map((c) => ({ balanceId: c.balanceId!, currency: c.currency, vatMinor: c.vatCents, shop: SHOP_ROLE[c.shopId] })))).hash;
     else await pause(400);
     const total = mine.reduce((n, c) => n + convert(c.vatCents, c.currency, 'EUR'), 0);
     commit({
@@ -294,7 +295,7 @@ export const ledger = {
     const claim = state.claims.find((c) => c.id === claimId);
     if (!claim || claim.status !== 'locked' || claim.deadline > Date.now()) return;
     let tx: string | undefined;
-    if (live() && claim.chainId !== undefined) tx = (await chainReclaim(SHOP_ROLE[claim.shopId], claim.chainId)).hash;
+    if (live() && claim.balanceId) tx = (await chainReclaim(SHOP_ROLE[claim.shopId], claim.balanceId)).hash;
     const shop = state.shops.find((s) => s.id === claim.shopId);
     commit({
       ...state,

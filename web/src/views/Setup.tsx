@@ -1,22 +1,7 @@
 import { useState } from 'react';
 import { Keypair, Operation } from '@stellar/stellar-sdk';
 import { CURRENCIES, type Code } from '../lib/money';
-import {
-  ASSET_CODES,
-  asset,
-  contractUrl,
-  deployContract,
-  deploySac,
-  fund,
-  getConfig,
-  initEscrow,
-  saveConfig,
-  submitClassic,
-  txUrl,
-  uploadWasm,
-  type ChainConfig,
-  type Role,
-} from '../lib/stellar';
+import { ASSET_CODES, accountUrl, asset, fund, getConfig, saveConfig, submitClassic, txUrl, type ChainConfig, type Role } from '../lib/stellar';
 
 const ROLES: Role[] = ['issuer', 'maker', 'platform', 'customs', 'traveller', 'lojaAzul', 'casaVerde'];
 const LOCAL: Code[] = ['EUR', 'CHF', 'JPY', 'SGD', 'KRW'];
@@ -29,7 +14,7 @@ interface Line {
   tone?: 'ok' | 'err';
 }
 
-/** One-click Testnet bootstrap: accounts, demo stablecoins, DEX liquidity, escrow contract. */
+/** One-click Testnet bootstrap: accounts, demo stablecoins and DEX liquidity. */
 export function Setup() {
   const [lines, setLines] = useState<Line[]>([]);
   const [busy, setBusy] = useState(false);
@@ -49,7 +34,7 @@ export function Setup() {
       const issuer = keys.issuer.publicKey();
       const trust: Record<Role, Code[]> = {
         issuer: [],
-        customs: [],
+        customs: LOCAL, // receives the VAT for the instant of the atomic release
         maker: ALL,
         traveller: ALL,
         platform: LOCAL,
@@ -91,32 +76,14 @@ export function Setup() {
       );
       log({ text: '16 offers live: every currency trades against cEUR', href: txUrl(offers), tone: 'ok' });
 
-      log({ text: 'Deploying the Stellar Asset Contracts of the local currencies…' });
-      const sac = {} as Record<Code, string>;
-      for (const c of ALL) sac[c] = asset(c, issuer).contractId('Test SDF Network ; September 2015');
-      for (const c of LOCAL) {
-        await deploySac(keys.issuer, asset(c, issuer));
-        log({ text: `${ASSET_CODES[c]} contract`, href: contractUrl(sac[c]) });
-      }
-
-      log({ text: 'Uploading the Carimbo escrow contract…' });
-      const wasmRes = await fetch('./carimbo_escrow.wasm');
-      if (!wasmRes.ok) throw new Error('carimbo_escrow.wasm is missing from the site');
-      const wasm = new Uint8Array(await wasmRes.arrayBuffer());
-      const wasmHash = await uploadWasm(keys.issuer, wasm);
-      const contractId = await deployContract(keys.issuer, wasmHash);
-      log({ text: 'Escrow deployed', href: contractUrl(contractId), tone: 'ok' });
-      const init = await initEscrow(keys.issuer, contractId, keys.customs.publicKey(), keys.platform.publicKey(), FEE_BPS);
-      log({ text: `Escrow initialised: customs signer set, fee ${FEE_BPS / 100}%`, href: txUrl(init.hash), tone: 'ok' });
+      log({ text: 'Customs signer ready: it can claim VAT only before each export deadline', href: accountUrl(keys.customs.publicKey()), tone: 'ok' });
 
       const cfg: ChainConfig = {
         network: 'testnet',
         createdAt: new Date().toISOString(),
-        contractId,
-        wasmHash,
+        escrow: 'claimable-balances',
         feeBps: FEE_BPS,
         issuer,
-        sac,
         accounts: Object.fromEntries(ROLES.map((r) => [r, { publicKey: keys[r].publicKey(), secret: keys[r].secret() }])) as ChainConfig['accounts'],
       };
       saveConfig(cfg);
@@ -135,14 +102,14 @@ export function Setup() {
         <header className="desk__head">
           <div className="stack-0">
             <h1 className="title">Testnet setup</h1>
-            <span className="muted">Creates the demo accounts, stablecoins, DEX liquidity and the escrow contract.</span>
+            <span className="muted">Creates the demo accounts, the demo stablecoins and their liquidity on the Stellar DEX.</span>
           </div>
           <button type="button" className="btn btn--go" onClick={run} disabled={busy}>
             {busy ? 'Deploying…' : result ? 'Deploy a fresh copy' : 'Deploy to Testnet'}
           </button>
         </header>
         <section className="card setup-log" aria-live="polite">
-          {lines.length === 0 && <p className="muted">{result ? `Live contract: ${result.contractId}` : 'Nothing deployed from this browser yet.'}</p>}
+          {lines.length === 0 && <p className="muted">{result ? `Live on Testnet. Issuer ${result.issuer.slice(0, 8)}…` : 'Nothing deployed from this browser yet.'}</p>}
           <ol className="stack-2">
             {lines.map((l, i) => (
               <li key={i} className={`setup-line setup-line--${l.tone ?? 'info'}`}>

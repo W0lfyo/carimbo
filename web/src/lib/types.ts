@@ -30,7 +30,7 @@ export interface Claim {
   status: ClaimStatus;
   travellerId?: string;
   payout?: Payout;
-  chainId?: number; // claim id inside the Soroban escrow contract
+  balanceId?: string; // the claimable balance holding the VAT on Stellar
 }
 
 export interface Payout {

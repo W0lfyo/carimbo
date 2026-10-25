@@ -3,33 +3,14 @@
  * testnet keys published in chain.json (worthless test money), so judges can replay
  * the full flow without installing a wallet.
  */
-import {
-  Account,
-  Address,
-  Asset,
-  BASE_FEE,
-  Contract,
-  Horizon,
-  Keypair,
-  Networks,
-  Operation,
-  TransactionBuilder,
-  nativeToScVal,
-  rpc,
-  scValToNative,
-  xdr,
-  type Transaction,
-} from '@stellar/stellar-sdk';
-import { Buffer } from 'buffer';
+import { Asset, BASE_FEE, Claimant, Horizon, Keypair, Networks, Operation, TransactionBuilder, xdr, type Transaction } from '@stellar/stellar-sdk';
 import type { Code } from './money';
 
-export const RPC_URL = 'https://soroban-testnet.stellar.org';
 export const HORIZON_URL = 'https://horizon-testnet.stellar.org';
 export const FRIENDBOT = 'https://friendbot.stellar.org';
 export const PASSPHRASE = Networks.TESTNET;
 export const EXPLORER = 'https://stellar.expert/explorer/testnet';
 
-export const rpcServer = new rpc.Server(RPC_URL);
 export const horizon = new Horizon.Server(HORIZON_URL);
 
 /** Demo stablecoins, one per currency, all issued by the Carimbo test issuer. */
@@ -50,15 +31,13 @@ export type Role = 'issuer' | 'maker' | 'platform' | 'customs' | 'traveller' | '
 export interface ChainConfig {
   network: 'testnet';
   createdAt: string;
-  contractId: string;
-  wasmHash: string;
+  escrow: 'claimable-balances';
   feeBps: number;
   issuer: string;
-  sac: Record<Code, string>; // Stellar Asset Contract id of each demo stablecoin
   accounts: Record<Role, { publicKey: string; secret: string }>;
 }
 
-const CONFIG_KEY = 'carimbo.chain.v1';
+const CONFIG_KEY = 'carimbo.chain.v2';
 let config: ChainConfig | null = null;
 
 export async function loadConfig(): Promise<ChainConfig | null> {
@@ -101,12 +80,10 @@ export function keypair(role: Role): Keypair {
 }
 
 /** Our amounts are hundredths; Stellar assets have 7 decimals. */
-export const toStroops = (minor: number) => BigInt(minor) * 100_000n;
-export const fromStroops = (s: bigint | string | number) => Number(BigInt(s) / 100_000n);
 export const toAmount = (minor: number) => (minor / 100).toFixed(2);
 
 export const txUrl = (hash: string) => `${EXPLORER}/tx/${hash}`;
-export const contractUrl = (id: string) => `${EXPLORER}/contract/${id}`;
+export const accountUrl = (id: string) => `${EXPLORER}/account/${id}`;
 
 // ---------------------------------------------------------------- classic
 
@@ -117,6 +94,10 @@ export async function fund(publicKey: string) {
 
 /** Build, sign and submit a classic transaction; returns its hash. */
 export async function submitClassic(source: Keypair, ops: xdr.Operation[], signers: Keypair[] = []): Promise<string> {
+  return (await submitClassicTx(source, ops, signers)).hash;
+}
+
+export async function submitClassicTx(source: Keypair, ops: xdr.Operation[], signers: Keypair[] = []): Promise<{ hash: string; tx: Transaction }> {
   const account = await horizon.loadAccount(source.publicKey());
   const builder = new TransactionBuilder(account, { fee: String(Number(BASE_FEE) * 10), networkPassphrase: PASSPHRASE });
   ops.forEach((op) => builder.addOperation(op));
@@ -124,129 +105,101 @@ export async function submitClassic(source: Keypair, ops: xdr.Operation[], signe
   tx.sign(source, ...signers);
   try {
     const res = await horizon.submitTransaction(tx);
-    return res.hash;
+    return { hash: res.hash, tx };
   } catch (e: unknown) {
     const extras = (e as { response?: { data?: { extras?: { result_codes?: unknown } } } }).response?.data?.extras?.result_codes;
     throw new Error(`Transaction failed: ${JSON.stringify(extras ?? (e as Error).message)}`);
   }
 }
 
-// ---------------------------------------------------------------- soroban
+// ---------------------------------------------------------------- escrow on native primitives
 
-async function sendSoroban(source: Keypair, op: xdr.Operation): Promise<{ hash: string; value: unknown }> {
-  const account = await rpcServer.getAccount(source.publicKey());
-  const built = new TransactionBuilder(account as Account, { fee: String(Number(BASE_FEE) * 100), networkPassphrase: PASSPHRASE })
-    .addOperation(op)
-    .setTimeout(60)
-    .build();
-  const prepared = (await rpcServer.prepareTransaction(built)) as Transaction;
-  prepared.sign(source);
-  const sent = await rpcServer.sendTransaction(prepared);
-  if (sent.status === 'ERROR') throw new Error(`Rejected: ${sent.errorResult?.toXDR('base64') ?? sent.status}`);
-  const hash = sent.hash;
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 750));
-    const got = await rpcServer.getTransaction(hash);
-    if (got.status === rpc.Api.GetTransactionStatus.SUCCESS) {
-      return { hash, value: got.returnValue ? scValToNative(got.returnValue) : undefined };
-    }
-    if (got.status === rpc.Api.GetTransactionStatus.FAILED) throw new Error(`Transaction ${hash.slice(0, 8)} failed on-chain`);
-  }
-  throw new Error(`Timed out waiting for ${hash.slice(0, 8)}`);
-}
-
-export async function uploadWasm(source: Keypair, wasm: Uint8Array): Promise<string> {
-  const { value } = await sendSoroban(source, Operation.uploadContractWasm({ wasm }));
-  return Buffer.from(value as Uint8Array).toString('hex');
-}
-
-export async function deployContract(source: Keypair, wasmHashHex: string): Promise<string> {
-  const { value } = await sendSoroban(
-    source,
-    Operation.createCustomContract({ address: Address.fromString(source.publicKey()), wasmHash: Buffer.from(wasmHashHex, 'hex') }),
-  );
-  return value as string; // contract address (C...)
-}
-
-export async function deploySac(source: Keypair, a: Asset): Promise<string> {
-  const id = a.contractId(PASSPHRASE);
-  try {
-    await sendSoroban(source, Operation.createStellarAssetContract({ asset: a }));
-  } catch (e) {
-    // Already deployed by an earlier run: the id is deterministic, so carry on.
-    if (!String((e as Error).message).includes('failed') && !String((e as Error).message).includes('Rejected')) throw e;
-  }
-  return id;
-}
-
-function call(fn: string, ...args: xdr.ScVal[]) {
-  return new Contract(config!.contractId).call(fn, ...args);
-}
-
-const u64 = (n: number | bigint) => nativeToScVal(BigInt(n), { type: 'u64' });
-const u32 = (n: number) => nativeToScVal(n, { type: 'u32' });
-const i128 = (n: bigint) => nativeToScVal(n, { type: 'i128' });
-const addr = (s: string) => Address.fromString(s).toScVal();
-
-export async function initEscrow(admin: Keypair, contractId: string, customs: string, platform: string, feeBps: number) {
-  const op = new Contract(contractId).call('init', addr(customs), addr(platform), u32(feeBps));
-  return sendSoroban(admin, op);
-}
-
-/** Shop locks the VAT. Returns the on-chain claim id and the transaction hash. */
+/**
+ * Each tax-free claim is a claimable balance created by the shop, holding the VAT:
+ *  - customs can claim it before the export deadline (to pay the traveller),
+ *  - the shop can claim it back only after the deadline.
+ * The time conditions are enforced by the Stellar protocol itself.
+ */
 export async function chainOpen(shop: Role, code: Code, vatMinor: number, deadlineMs: number) {
   const kp = keypair(shop);
-  const { hash, value } = await sendSoroban(
-    kp,
-    call('open', addr(kp.publicKey()), addr(config!.sac[code]), i128(toStroops(vatMinor)), u64(Math.floor(deadlineMs / 1000))),
-  );
-  return { hash, id: Number(value as bigint) };
+  const deadline = String(Math.floor(deadlineMs / 1000));
+  const op = Operation.createClaimableBalance({
+    asset: asset(code),
+    amount: toAmount(vatMinor),
+    claimants: [
+      new Claimant(config!.accounts.customs.publicKey, Claimant.predicateBeforeAbsoluteTime(deadline)),
+      new Claimant(kp.publicKey(), Claimant.predicateNot(Claimant.predicateBeforeAbsoluteTime(deadline))),
+    ],
+  });
+  const { hash, tx } = await submitClassicTx(kp, [op]);
+  return { hash, balanceId: tx.getClaimableBalanceId(0) };
 }
 
-export async function chainAttach(id: number) {
+/** The traveller records the claim on her own account (a data entry she signs). */
+export async function chainAttach(balanceId: string) {
   const kp = keypair('traveller');
-  return sendSoroban(kp, call('attach', u64(id), addr(kp.publicKey())));
+  const hash = await submitClassic(kp, [Operation.manageData({ name: `carimbo:${balanceId.slice(-48)}`, value: 'attached' })]);
+  return { hash };
 }
 
-export async function chainRelease(ids: number[]) {
-  return sendSoroban(keypair('customs'), call('release', vecU64(ids)));
-}
-
-export async function chainReject(ids: number[]) {
-  return sendSoroban(keypair('customs'), call('reject', vecU64(ids)));
-}
-
-export async function chainReclaim(shop: Role, id: number) {
-  return sendSoroban(keypair(shop), call('reclaim', u64(id)));
-}
-
-function vecU64(ids: number[]) {
-  return xdr.ScVal.scvVec(ids.map((i) => u64(i)));
+export interface ReleaseItem {
+  balanceId: string;
+  currency: Code;
+  vatMinor: number;
 }
 
 /**
- * Convert the traveller's refund on the Stellar DEX: a path payment from the claim
- * currency to the payout currency, sent to themselves.
+ * Customs certifies the export. One atomic transaction: claim every balance, send the
+ * 0.5% fee to the platform, convert the rest on the DEX and pay the traveller.
  */
-export async function chainConvert(from: Code, to: Code, minor: number): Promise<{ hash: string; received: number }> {
-  const kp = keypair('traveller');
-  if (from === to) return { hash: '', received: minor };
-  const sendAmount = toAmount(minor);
-  const paths = await horizon.strictSendPaths(asset(from), sendAmount, [asset(to)]).call();
-  const best = paths.records.sort((a, b) => Number(b.destination_amount) - Number(a.destination_amount))[0];
-  if (!best) throw new Error(`No DEX path from ${from} to ${to}`);
-  const destMin = (Number(best.destination_amount) * 0.99).toFixed(7);
-  const hash = await submitClassic(kp, [
-    Operation.pathPaymentStrictSend({
-      sendAsset: asset(from),
-      sendAmount,
-      destination: kp.publicKey(),
-      destAsset: asset(to),
-      destMin,
-      path: best.path.map((p) => (p.asset_type === 'native' ? Asset.native() : new Asset(p.asset_code!, p.asset_issuer!))),
-    }),
+export async function chainRelease(items: ReleaseItem[], to: Code): Promise<{ hash: string; received: Map<Code, number> }> {
+  const customs = keypair('customs');
+  const traveller = config!.accounts.traveller.publicKey;
+  const ops: xdr.Operation[] = items.map((i) => Operation.claimClaimableBalance({ balanceId: i.balanceId }));
+  const received = new Map<Code, number>();
+  const groups = new Map<Code, number>();
+  items.forEach((i) => groups.set(i.currency, (groups.get(i.currency) ?? 0) + i.vatMinor));
+  for (const [cur, total] of groups) {
+    const fee = Math.floor((total * config!.feeBps) / 10_000);
+    const net = total - fee;
+    if (fee > 0) ops.push(Operation.payment({ destination: config!.accounts.platform.publicKey, asset: asset(cur), amount: toAmount(fee) }));
+    if (cur === to) {
+      ops.push(Operation.payment({ destination: traveller, asset: asset(cur), amount: toAmount(net) }));
+      received.set(cur, net);
+    } else {
+      const paths = await horizon.strictSendPaths(asset(cur), toAmount(net), [asset(to)]).call();
+      const best = paths.records.sort((a, b) => Number(b.destination_amount) - Number(a.destination_amount))[0];
+      if (!best) throw new Error(`No DEX path from ${cur} to ${to}`);
+      ops.push(
+        Operation.pathPaymentStrictSend({
+          sendAsset: asset(cur),
+          sendAmount: toAmount(net),
+          destination: traveller,
+          destAsset: asset(to),
+          destMin: (Number(best.destination_amount) * 0.99).toFixed(7),
+          path: best.path.map((p) => (p.asset_type === 'native' ? Asset.native() : new Asset(p.asset_code!, p.asset_issuer!))),
+        }),
+      );
+      received.set(cur, Math.round(Number(best.destination_amount) * 100));
+    }
+  }
+  const hash = await submitClassic(customs, ops);
+  return { hash, received };
+}
+
+/** Customs refuses the export: claim each balance and pay the VAT back to its shop. */
+export async function chainReject(items: (ReleaseItem & { shop: Role })[]) {
+  const customs = keypair('customs');
+  const ops = items.flatMap((i) => [
+    Operation.claimClaimableBalance({ balanceId: i.balanceId }),
+    Operation.payment({ destination: config!.accounts[i.shop].publicKey, asset: asset(i.currency), amount: toAmount(i.vatMinor) }),
   ]);
-  return { hash, received: Math.round(Number(best.destination_amount) * 100) };
+  return { hash: await submitClassic(customs, ops) };
+}
+
+/** After the deadline the protocol lets the shop claim its VAT back. */
+export async function chainReclaim(shop: Role, balanceId: string) {
+  return { hash: await submitClassic(keypair(shop), [Operation.claimClaimableBalance({ balanceId })]) };
 }
 
 export async function balances(publicKey: string): Promise<Record<string, string>> {
