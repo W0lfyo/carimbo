@@ -5,14 +5,15 @@ import { ShopView } from './views/Shop';
 import { CustomsView } from './views/Customs';
 import { Traveller } from './views/Traveller';
 import { Setup } from './views/Setup';
+import { startSync } from './lib/sync';
 
-type Route = { path: 'demo' | 'traveller' | 'shop' | 'customs' | 'setup'; join?: string };
+type Route = { path: 'demo' | 'traveller' | 'shop' | 'customs' | 'setup'; join?: string; query?: URLSearchParams };
 
 function parse(): Route {
   const raw = location.hash.replace(/^#\/?/, '');
   const [path, query = ''] = raw.split('?');
   const join = new URLSearchParams(query).get('join') ?? undefined;
-  if (path === 'traveller' || path === 'shop' || path === 'customs' || path === 'setup') return { path, join };
+  if (path === 'traveller' || path === 'shop' || path === 'customs' || path === 'setup') return { path, join, query: new URLSearchParams(query) };
   return { path: 'demo' };
 }
 
@@ -25,6 +26,8 @@ const LINKS: { path: Route['path']; label: string }[] = [
 
 export function App() {
   const [route, setRoute] = useState<Route>(parse);
+
+  useEffect(() => startSync(), []);
 
   useEffect(() => {
     const on = () => {
@@ -67,7 +70,7 @@ export function App() {
       {route.path === 'traveller' && (
         <main className="page page--phone">
           <div className="phone phone--solo">
-            <Traveller joinCode={route.join} />
+            <Traveller joinCode={route.join} joinQuery={route.query} />
           </div>
         </main>
       )}

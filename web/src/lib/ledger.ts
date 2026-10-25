@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { Activity, ActivityKind, Claim, CurrencyCode, LedgerState } from './types';
 import { convert, feeOf, fmt, rateBetween, vatFromGross } from './money';
-import { chainAttach, chainOpen, chainReclaim, chainRelease, chainReject, getConfig, type Role } from './stellar';
+import { chainAttach, chainOpen, chainReclaim, chainRelease, chainReject, chainSetCurrency, claimableInfo, getConfig, type Role } from './stellar';
 import { countryOf, exportDeadline } from './countries';
 
 /**
@@ -123,8 +123,8 @@ function commit(next: LedgerState) {
   listeners.forEach((l) => l());
 }
 
-function activity(kind: ActivityKind, label: string, amount: string, tx?: string): Activity {
-  return { id: hex(6), at: Date.now(), kind, label, amount, tx: tx || hex(), live: !!tx };
+function activity(kind: ActivityKind, label: string, amount: string, tx?: string, onChainNoHash = false): Activity {
+  return { id: hex(6), at: Date.now(), kind, label, amount, tx: tx || hex(), live: !!tx && !onChainNoHash };
 }
 
 const SHOP_ROLE: Record<string, Role> = { 'loja-azul': 'lojaAzul', 'casa-verde': 'casaVerde' };
@@ -143,6 +143,90 @@ export function useLedger(): LedgerState {
     },
     () => state,
   );
+}
+
+let releasing = false;
+/** True while this device is signing a release: chain sync waits so it does not apply it twice. */
+export const isReleasing = () => releasing;
+
+/** Customs stamps the whole trip: every open claim is released in one atomic transaction. */
+async function clearTripInner(): Promise<void> {
+  const t = state.traveller;
+  const mine = state.claims.filter((c) => c.travellerId === t.id && c.status === 'locked');
+  if (mine.length === 0) return;
+  const started = Date.now();
+  // The fee is 0.5% of each currency group's total (exactly what the release transaction
+  // pays), shared across its claims so the parts add up to the whole.
+  const feeShare = new Map<string, number>();
+  const byCur = new Map<CurrencyCode, Claim[]>();
+  mine.forEach((c) => byCur.set(c.currency, [...(byCur.get(c.currency) ?? []), c]));
+  for (const list of byCur.values()) {
+    const total = list.reduce((n, c) => n + c.vatCents, 0);
+    const fee = feeOf(total);
+    let left = fee;
+    list.forEach((c, i) => {
+      const part = i === list.length - 1 ? left : Math.floor((fee * c.vatCents) / total);
+      left -= part;
+      feeShare.set(c.id, part);
+    });
+  }
+  const net = (c: Claim) => c.vatCents - (feeShare.get(c.id) ?? 0);
+
+  // One atomic Stellar transaction: claim, fee, DEX conversion, payout.
+  let releaseTx: string | undefined;
+  let chainReceived: Map<CurrencyCode, number> | undefined;
+  const onChain = live() && mine.every((c) => c.balanceId);
+  if (onChain) {
+    const res = await chainRelease(
+      mine.map((c) => ({ balanceId: c.balanceId!, currency: c.currency, vatMinor: c.vatCents })),
+      t.currency,
+    );
+    releaseTx = res.hash;
+    chainReceived = res.received;
+  } else await pause(500);
+
+  // Share each currency group's converted amount across its claims.
+  const received = new Map<string, number>();
+  const effective = new Map<CurrencyCode, number>();
+  const groups = new Map<CurrencyCode, Claim[]>();
+  mine.forEach((c) => groups.set(c.currency, [...(groups.get(c.currency) ?? []), c]));
+  for (const [cur, list] of groups) {
+    const sent = list.reduce((n, c) => n + net(c), 0);
+    const got = chainReceived?.get(cur) ?? convert(sent, cur, t.currency);
+    effective.set(cur, Math.round((got / sent) * 10_000) / 10_000);
+    list.forEach((c) => received.set(c.id, Math.round((got * net(c)) / sent)));
+  }
+
+  const now = Date.now();
+  const seconds = Math.max(1, Math.round((now - started) / 1000));
+  const paid = new Map<string, Claim>();
+  for (const c of mine) {
+    paid.set(c.id, {
+      ...c,
+      status: 'refunded',
+      payout: {
+        currency: t.currency,
+        rate: onChain ? effective.get(c.currency) ?? rateBetween(c.currency, t.currency) : rateBetween(c.currency, t.currency),
+        feeCents: feeShare.get(c.id) ?? 0,
+        amountMinor: received.get(c.id) ?? 0,
+        seconds: onChain ? seconds : 4 + Math.round(Math.random() * 2),
+        at: now,
+        tx: releaseTx,
+      },
+    });
+  }
+  const amount = [...paid.values()].reduce((n, c) => n + (c.payout?.amountMinor ?? 0), 0);
+  const totalEur = mine.reduce((n, c) => n + convert(c.vatCents, c.currency, 'EUR'), 0);
+  commit({
+    ...state,
+    stampedAt: now,
+    claims: state.claims.map((c) => paid.get(c.id) ?? c),
+    activity: [
+      activity('convert', `Same transaction: converted on the Stellar DEX, ${t.name} paid in ${t.currency}`, fmt(amount, t.currency), releaseTx),
+      activity('clear', `Customs signed: ${mine.length} claimable ${mine.length > 1 ? 'balances' : 'balance'} released`, fmt(totalEur, 'EUR'), releaseTx),
+      ...state.activity,
+    ],
+  });
 }
 
 /**
@@ -214,88 +298,110 @@ export const ledger = {
     return claim;
   },
 
-  setCurrency(currency: CurrencyCode) {
+  setCurrency(currency: CurrencyCode, fromChain = false) {
+    if (currency === state.traveller.currency) return;
     commit({ ...state, traveller: { ...state.traveller, currency } });
+    // Tell the other devices (the customs desk) through the traveller's account.
+    if (!fromChain && live()) void chainSetCurrency(currency).catch(() => undefined);
   },
 
-  /** Customs stamps the whole trip: every open claim is released, then converted on the DEX. */
-  async clearTrip(): Promise<void> {
+  /**
+   * A phone that scanned a shop QR imports the claim from the link, after checking on
+   * Stellar that the claimable balance really holds that VAT.
+   */
+  async importClaim(q: URLSearchParams): Promise<Claim | null> {
+    const code = (q.get('join') ?? '').toUpperCase();
+    const existing = state.claims.find((c) => c.code === code);
+    if (existing) return existing;
+    const balanceId = q.get('cb') ?? undefined;
+    const currency = q.get('c') as CurrencyCode | null;
+    const vat = Number(q.get('v'));
+    const shopId = q.get('s') ?? '';
+    if (!code || !currency || !vat || !state.shops.some((s) => s.id === shopId)) return null;
+    if (live() && balanceId) {
+      const info = await claimableInfo(balanceId);
+      if (!info || info.amountMinor !== vat || info.code !== currency) throw new Error('This QR does not match any VAT locked on Stellar.');
+    }
+    const claim: Claim = {
+      id: hex(8),
+      code,
+      shopId,
+      item: q.get('i') ?? 'Purchase',
+      currency,
+      paidCents: Number(q.get('p')),
+      vatRate: Number(q.get('r')),
+      vatCents: vat,
+      createdAt: Number(q.get('t')) || Date.now(),
+      deadline: Number(q.get('d')),
+      status: 'locked',
+      balanceId,
+    };
+    commit({ ...state, claims: [claim, ...state.claims] });
+    return claim;
+  },
+
+  /** Seen on Stellar: the traveller attached these claims from her phone. */
+  applyAttached(ids: string[]) {
     const t = state.traveller;
-    const mine = state.claims.filter((c) => c.travellerId === t.id && c.status === 'locked');
-    if (mine.length === 0) return;
-    const started = Date.now();
-    // The fee is 0.5% of each currency group's total (exactly what the release transaction
-    // pays), shared across its claims so the parts add up to the whole.
-    const feeShare = new Map<string, number>();
-    const byCur = new Map<CurrencyCode, Claim[]>();
-    mine.forEach((c) => byCur.set(c.currency, [...(byCur.get(c.currency) ?? []), c]));
-    for (const list of byCur.values()) {
-      const total = list.reduce((n, c) => n + c.vatCents, 0);
-      const fee = feeOf(total);
-      let left = fee;
-      list.forEach((c, i) => {
-        const part = i === list.length - 1 ? left : Math.floor((fee * c.vatCents) / total);
-        left -= part;
-        feeShare.set(c.id, part);
-      });
-    }
-    const net = (c: Claim) => c.vatCents - (feeShare.get(c.id) ?? 0);
+    const now = state.claims.filter((c) => ids.includes(c.id));
+    if (!now.length) return;
+    commit({
+      ...state,
+      claims: state.claims.map((c) => (ids.includes(c.id) ? { ...c, travellerId: t.id } : c)),
+      activity: [
+        ...now.map((c) => activity('join', `${t.name} attached the claim from her phone`, fmt(c.vatCents, c.currency), undefined, true)),
+        ...state.activity,
+      ],
+    });
+  },
 
-    // One atomic Stellar transaction: claim, fee, DEX conversion, payout.
-    let releaseTx: string | undefined;
-    let chainReceived: Map<CurrencyCode, number> | undefined;
-    const onChain = live() && mine.every((c) => c.balanceId);
-    if (onChain) {
-      const res = await chainRelease(
-        mine.map((c) => ({ balanceId: c.balanceId!, currency: c.currency, vatMinor: c.vatCents })),
-        t.currency,
-      );
-      releaseTx = res.hash;
-      chainReceived = res.received;
-    } else await pause(500);
-
-    // Share each currency group's converted amount across its claims.
-    const received = new Map<string, number>();
-    const effective = new Map<CurrencyCode, number>();
-    const groups = new Map<CurrencyCode, Claim[]>();
-    mine.forEach((c) => groups.set(c.currency, [...(groups.get(c.currency) ?? []), c]));
-    for (const [cur, list] of groups) {
-      const sent = list.reduce((n, c) => n + net(c), 0);
-      const got = chainReceived?.get(cur) ?? convert(sent, cur, t.currency);
-      effective.set(cur, Math.round((got / sent) * 10_000) / 10_000);
-      list.forEach((c) => received.set(c.id, Math.round((got * net(c)) / sent)));
-    }
-
-    const now = Date.now();
-    const seconds = Math.max(1, Math.round((now - started) / 1000));
+  /** Seen on Stellar: customs paid the traveller for these claims (released on another device). */
+  applySettled(ids: string[], payout: { hash: string; code: CurrencyCode; amountMinor: number; at: number }) {
+    const list = state.claims.filter((c) => ids.includes(c.id) && c.status === 'locked');
+    if (!list.length) return;
+    const total = list.reduce((n, c) => n + convert(c.vatCents, c.currency, 'EUR'), 0);
+    let left = payout.amountMinor;
     const paid = new Map<string, Claim>();
-    for (const c of mine) {
+    list.forEach((c, i) => {
+      const part = i === list.length - 1 ? left : Math.round((payout.amountMinor * convert(c.vatCents, c.currency, 'EUR')) / total);
+      left -= part;
+      const fee = feeOf(c.vatCents);
       paid.set(c.id, {
         ...c,
         status: 'refunded',
         payout: {
-          currency: t.currency,
-          rate: onChain ? effective.get(c.currency) ?? rateBetween(c.currency, t.currency) : rateBetween(c.currency, t.currency),
-          feeCents: feeShare.get(c.id) ?? 0,
-          amountMinor: received.get(c.id) ?? 0,
-          seconds: onChain ? seconds : 4 + Math.round(Math.random() * 2),
-          at: now,
-          tx: releaseTx,
+          currency: payout.code,
+          rate: Math.round((part / (c.vatCents - fee)) * 10_000) / 10_000,
+          feeCents: fee,
+          amountMinor: part,
+          seconds: Math.max(1, Math.round((Date.now() - payout.at) / 1000)),
+          at: Date.now(),
+          tx: payout.hash,
         },
       });
-    }
-    const amount = [...paid.values()].reduce((n, c) => n + (c.payout?.amountMinor ?? 0), 0);
-    const totalEur = mine.reduce((n, c) => n + convert(c.vatCents, c.currency, 'EUR'), 0);
+    });
     commit({
       ...state,
-      stampedAt: now,
+      stampedAt: Date.now(),
       claims: state.claims.map((c) => paid.get(c.id) ?? c),
-      activity: [
-        activity('convert', `Same transaction: converted on the Stellar DEX, ${t.name} paid in ${t.currency}`, fmt(amount, t.currency), releaseTx),
-        activity('clear', `Customs signed: ${mine.length} claimable ${mine.length > 1 ? 'balances' : 'balance'} released`, fmt(totalEur, 'EUR'), releaseTx),
-        ...state.activity,
-      ],
+      activity: [activity('convert', `Refund received on Stellar`, fmt(payout.amountMinor, payout.code), payout.hash), ...state.activity],
     });
+  },
+
+  /** Seen on Stellar: the balances are gone without a refund to the traveller. */
+  applyClosed(ids: string[]) {
+    if (!ids.length) return;
+    commit({ ...state, claims: state.claims.map((c) => (ids.includes(c.id) && c.status === 'locked' ? { ...c, status: 'rejected' } : c)) });
+  },
+
+  /** Customs stamps the whole trip: every open claim is released, then converted on the DEX. */
+  async clearTrip(): Promise<void> {
+    releasing = true;
+    try {
+      await clearTripInner();
+    } finally {
+      releasing = false;
+    }
   },
 
   async rejectTrip(): Promise<void> {

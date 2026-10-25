@@ -19,8 +19,11 @@ interface BasketLine {
   rate: number;
 }
 
-export function joinUrl(code: string): string {
-  return `${location.origin}${location.pathname}#/traveller?join=${code}`;
+/** The QR carries the claim itself, so a phone that never saw this till can import it and check it on Stellar. */
+export function joinUrl(c: Claim): string {
+  const q = new URLSearchParams({ join: c.code, s: c.shopId, i: c.item, c: c.currency, p: String(c.paidCents), v: String(c.vatCents), r: String(c.vatRate), d: String(c.deadline), t: String(c.createdAt) });
+  if (c.balanceId) q.set('cb', c.balanceId);
+  return `${location.origin}${location.pathname}#/traveller?${q.toString()}`;
 }
 
 export function ShopView({ initialShop = 'loja-azul', compact = false }: { initialShop?: string; compact?: boolean }) {
@@ -233,7 +236,7 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
             <>
               <h2 className="subtitle">Turn the screen to your customer</h2>
               <div className="handoff__qr">
-                <QR value={joinUrl(live.code)} size={compact ? 168 : 216} label={`QR code for claim ${live.code}`} />
+                <QR value={joinUrl(live)} size={compact ? 168 : 216} label={`QR code for claim ${live.code}`} />
               </div>
               <span className="mono handoff__code">{live.code}</span>
               <p className="muted center">

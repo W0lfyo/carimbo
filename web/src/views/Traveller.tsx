@@ -22,7 +22,7 @@ function FaceIdIcon() {
   );
 }
 
-export function Traveller({ joinCode }: { joinCode?: string }) {
+export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuery?: URLSearchParams }) {
   const s = useLedger();
   const t = s.traveller;
   const [screen, setScreen] = useState<Screen>('trip');
@@ -37,6 +37,22 @@ export function Traveller({ joinCode }: { joinCode?: string }) {
   const rejected = mine.filter((c) => c.status === 'rejected');
   const pending = joinCode ? s.claims.find((c) => c.code === joinCode && c.status === 'locked' && c.travellerId !== t.id) : undefined;
   const shopOf = (id: string) => s.shops.find((x) => x.id === id)!;
+
+  // A phone that scanned a QR from another device imports the claim from the link.
+  const known = joinCode ? s.claims.some((c) => c.code === joinCode) : true;
+  const [importing, setImporting] = useState(false);
+  useEffect(() => {
+    if (known || !joinQuery?.get('s')) return;
+    setImporting(true);
+    setError('');
+    ledger
+      .importClaim(joinQuery)
+      .then((c) => {
+        if (!c) setError('This QR code is incomplete. Ask the shop to show it again.');
+      })
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setImporting(false));
+  }, [known, joinQuery]);
 
   // A fresh stamp brings the traveller to the refund moment, wherever they were.
   const justPaid = paid.length > 0 && open.length === 0;
@@ -61,6 +77,19 @@ export function Traveller({ joinCode }: { joinCode?: string }) {
       setTyped('');
       if (location.hash.includes('join=')) location.hash = '#/traveller';
     }
+  }
+
+  if (importing) {
+    return (
+      <div className="phone-screen phone-screen--paper">
+        <div className="brandline">
+          <LogoMark />
+          <span>Carimbo</span>
+        </div>
+        <h1 className="headline">Checking your receipt on Stellar…</h1>
+        <p className="lede">We make sure the shop really locked your VAT before adding it to your trip.</p>
+      </div>
+    );
   }
 
   // ---------- 1. joining from a shop QR ----------

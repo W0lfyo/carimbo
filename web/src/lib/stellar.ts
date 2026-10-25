@@ -224,6 +224,73 @@ export async function chainReclaim(shop: Role, balanceId: string) {
   return { hash: await submitClassic(keypair(shop), [Operation.claimClaimableBalance({ balanceId })]) };
 }
 
+// ---------------------------------------------------------------- reads for multi-device sync
+
+const DATA_PREFIX = 'carimbo:';
+export const attachKey = (balanceId: string) => `${DATA_PREFIX}${balanceId.slice(-48)}`;
+
+/** The traveller tells every device which currency she wants, as a data entry on her account. */
+export async function chainSetCurrency(code: Code) {
+  return { hash: await submitClassic(keypair('traveller'), [Operation.manageData({ name: `${DATA_PREFIX}currency`, value: code })]) };
+}
+
+/** Data entries on the traveller's account (attachments and preferred currency), decoded. */
+export async function travellerData(): Promise<Record<string, string>> {
+  const acc = await horizon.loadAccount(config!.accounts.traveller.publicKey);
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(acc.data_attr ?? {})) {
+    try {
+      out[k] = atob(v as string);
+    } catch {
+      /* skip */
+    }
+  }
+  return out;
+}
+
+export async function balanceExists(balanceId: string): Promise<boolean> {
+  try {
+    await horizon.claimableBalances().claimableBalance(balanceId).call();
+    return true;
+  } catch (e) {
+    const status = (e as { response?: { status?: number } }).response?.status;
+    if (status === 404) return false;
+    throw e;
+  }
+}
+
+export interface ClaimableInfo {
+  amountMinor: number;
+  code: Code | null;
+  sponsor: string;
+}
+
+export async function claimableInfo(balanceId: string): Promise<ClaimableInfo | null> {
+  try {
+    const cb = await horizon.claimableBalances().claimableBalance(balanceId).call();
+    const assetCode = cb.asset.split(':')[0];
+    const code = (Object.entries(ASSET_CODES).find(([, v]) => v === assetCode)?.[0] ?? null) as Code | null;
+    return { amountMinor: Math.round(Number(cb.amount) * 100), code, sponsor: cb.sponsor ?? '' };
+  } catch {
+    return null;
+  }
+}
+
+/** The latest payment customs made to the traveller since `sinceMs`: the refund. */
+export async function latestRefund(sinceMs: number): Promise<{ hash: string; code: Code; amountMinor: number; at: number } | null> {
+  const page = await horizon.payments().forAccount(config!.accounts.traveller.publicKey).order('desc').limit(20).call();
+  for (const r of page.records as unknown as Array<Record<string, string>>) {
+    const at = Date.parse(r.created_at);
+    if (at < sinceMs - 60_000) break;
+    const fromCustoms = r.from === config!.accounts.customs.publicKey || r.source_account === config!.accounts.customs.publicKey;
+    if (!fromCustoms || r.to !== config!.accounts.traveller.publicKey) continue;
+    const code = (Object.entries(ASSET_CODES).find(([, v]) => v === r.asset_code)?.[0] ?? null) as Code | null;
+    if (!code) continue;
+    return { hash: r.transaction_hash, code, amountMinor: Math.round(Number(r.amount) * 100), at };
+  }
+  return null;
+}
+
 export async function balances(publicKey: string): Promise<Record<string, string>> {
   const acc = await horizon.loadAccount(publicKey);
   const out: Record<string, string> = {};
