@@ -84,9 +84,9 @@ export function Setup() {
           // Two-sided book around the reference rate with a 0.3% spread each way,
           // so the maker's own bid and ask never cross.
           // sell X for EUR: price of 1 X in EUR
-          Operation.manageSellOffer({ selling: asset(c, issuer), buying: asset('EUR', issuer), amount: big(c, 1_000_000), price: ((1 / CURRENCIES[c].perEur) * 1.003).toFixed(7) }),
+          Operation.manageSellOffer({ selling: asset(c, issuer), buying: asset('EUR', issuer), amount: big(c, 200_000), price: ((1 / CURRENCIES[c].perEur) * 1.003).toFixed(7) }),
           // sell EUR for X: price of 1 EUR in X
-          Operation.manageSellOffer({ selling: asset('EUR', issuer), buying: asset(c, issuer), amount: '1000000', price: (CURRENCIES[c].perEur * 1.003).toFixed(4) }),
+          Operation.manageSellOffer({ selling: asset('EUR', issuer), buying: asset(c, issuer), amount: '200000', price: (CURRENCIES[c].perEur * 1.003).toFixed(4) }),
         ]),
       );
       log({ text: '16 offers live: every currency trades against cEUR', href: txUrl(offers), tone: 'ok' });
