@@ -113,9 +113,9 @@ export async function twRefuse(contractId: string, shop: Role, usdcMinor: number
   return (await step('/escrow/single-release/resolve-dispute', { contractId, disputeResolver: customs.publicKey(), distributions: [{ address: pk(shop), amount: usdcMinor / 100 }] }, customs)).hash;
 }
 
-/** The released USDC reach the traveller; for another currency she converts them on the DEX in one path payment. */
+/** The released USDC reach the traveller; she converts them on the DEX into her currency's Carimbo stablecoin in one path payment. */
 export async function twConvert(minor: number, to: Code): Promise<{ hash?: string; received: number }> {
-  if (to === 'USD' || minor <= 0) return { received: minor };
+  if (minor <= 0) return { received: minor };
   const paths = await horizon.strictSendPaths(USDC, toAmount(minor), [asset(to)]).call();
   const best = paths.records.sort((a, b) => Number(b.destination_amount) - Number(a.destination_amount))[0];
   if (!best) throw new Error(`No DEX path from USDC to ${to}`);
@@ -135,7 +135,7 @@ export async function twConvert(minor: number, to: Code): Promise<{ hash?: strin
 
 /** Escrow state from the Trustless Work indexer, for the phone's sync. */
 export async function twEscrow(contractId: string): Promise<{ released: boolean; disputed: boolean; resolved: boolean } | null> {
-  const res = await fetch(`${TW_API}/helper/get-escrow-by-contract-ids?contractIds=${encodeURIComponent(contractId)}&validateOnChain=true`, { headers: { 'x-api-key': twKey() } });
+  const res = await fetch(`${TW_API}/helper/get-escrow-by-contract-ids?contractIds[]=${encodeURIComponent(contractId)}&validateOnChain=true`, { headers: { 'x-api-key': twKey() } });
   if (!res.ok) return null;
   const data = (await res.json()) as Array<{ flags?: { released?: boolean; disputed?: boolean; resolved?: boolean } }> | { escrows?: unknown[] };
   const first = (Array.isArray(data) ? data[0] : (data.escrows as Array<{ flags?: Record<string, boolean> }> | undefined)?.[0]) as { flags?: Record<string, boolean> } | undefined;
