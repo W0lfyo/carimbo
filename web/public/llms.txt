@@ -1,0 +1,29 @@
+# Carimbo
+
+> Tax-free VAT refunds that land in the traveller's own currency the moment customs stamps, on Stellar. Built at HackMeridian 2026 (Lisbon), Genesis track, Stellar Unlocked.
+
+Carimbo is a single-page web app (React + TypeScript) running on Stellar Testnet, with no backend server. The shop locks the VAT of a tax-free sale in escrow; the traveller adds the receipt from her phone after an eligibility check; customs stamps once and one atomic Stellar transaction claims the VAT, takes a 0.5% fee, converts on the Stellar DEX and pays the traveller in her currency. After the legal export deadline, only the shop can take the VAT back, enforced by the protocol.
+
+## Try it
+
+- [Demo](https://carimbo-six.vercel.app/): press "Play the refund" for the whole story in 20 seconds, with every transaction linked to Stellar Expert.
+- [Shop](https://carimbo-six.vercel.app/#/shop): the till. Lock VAT, show the QR. Escrow choice: Stellar claimable balance or Trustless Work escrow. Option: 2-minute export window to see Stellar refuse a late stamp.
+- [Traveller](https://carimbo-six.vercel.app/#/traveller): the phone. Declaration, eligibility verdict, passkey (Face ID / Touch ID / Windows Hello), payout currency, refund.
+- [Customs](https://carimbo-six.vercel.app/#/customs): the desk. Stamp and release, or refuse.
+
+## How Stellar is used
+
+- Claimable balances with time predicates: customs may claim before the export deadline, the shop only after it.
+- Path payments on the built-in DEX for currency conversion, inside one atomic transaction.
+- Issued demo stablecoins (cEUR, cUSD, cGBP, cJPY, cBRL, cCNY, cCHF, cSGD, cKRW) and market-maker offers.
+- Data entries on the traveller's account as shared state between devices.
+- Trustless Work single-release escrow (Soroban) as a second escrow engine, holding Circle Testnet USDC.
+- A Soroban version of the escrow in Rust with 8 unit tests (not deployed).
+
+## Tax-free rules
+
+22 countries' rules (VAT rates, minimum VAT included or excluded and how receipts add up, export window, residence zone, minimum age, maximum stay, refund model, exclusions, sources) and a pure eligibility engine with 27 unit tests. Information only, not legal or tax advice.
+
+## Source
+
+- [Code and README](https://github.com/W0lfyo/carimbo): architecture, Testnet accounts and transactions as evidence.
