@@ -31,6 +31,8 @@ export interface Claim {
   travellerId?: string;
   payout?: Payout;
   balanceId?: string; // the claimable balance holding the VAT on Stellar
+  escrow?: 'native' | 'trustless'; // which escrow holds the VAT (native claimable balance by default)
+  contractId?: string; // the Trustless Work escrow contract, when escrow is 'trustless'
   archived?: boolean; // hidden from the traveller once she starts a new trip
   lines?: { item: string; paidMinor: number; vatRate: number; vatMinor: number }[]; // receipt lines
 }

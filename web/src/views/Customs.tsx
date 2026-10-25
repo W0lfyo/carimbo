@@ -186,7 +186,10 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
                   <tbody>
                     {open.map((c) => (
                       <tr key={c.id}>
-                        <td>{shopOf(c.shopId).name}</td>
+                        <td>
+                          {shopOf(c.shopId).name}
+                          {c.escrow === 'trustless' && <span className="tag">Trustless Work</span>}
+                        </td>
                         <td>{c.item}</td>
                         <td className="num mono">{fmtPlain(c.paidCents, c.currency)}</td>
                         <td className="num mono">{fmt(c.vatCents, c.currency)}</td>

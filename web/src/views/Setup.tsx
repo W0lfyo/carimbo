@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Keypair, Operation } from '@stellar/stellar-sdk';
 import { CURRENCIES, type Code } from '../lib/money';
+import { deployTokenContracts } from '../lib/trustless';
 import { ASSET_CODES, SHOP_ROLES, accountUrl, asset, balances, fund, getConfig, keypair, saveConfig, submitClassic, txUrl, type ChainConfig, type Role } from '../lib/stellar';
 
 const ROLES: Role[] = ['issuer', 'maker', 'platform', 'customs', 'traveller', ...SHOP_ROLES];
@@ -140,6 +141,28 @@ export function Setup() {
     }
   }
 
+  const [twKeyInput, setTwKeyInput] = useState(result?.trustlessWork?.apiKey ?? '');
+
+  /** Trustless Work escrows hold Soroban tokens: publish the stablecoins' asset contracts once, and save the API key. */
+  async function prepareTrustless() {
+    const cfg = getConfig();
+    if (!cfg) return;
+    setBusy(true);
+    setLines([]);
+    try {
+      const next = { ...cfg, trustlessWork: twKeyInput.trim() ? { apiKey: twKeyInput.trim() } : cfg.trustlessWork };
+      saveConfig(next);
+      setResult(next);
+      log({ text: 'Publishing the Stellar Asset Contracts of the local-currency stablecoins…' });
+      await deployTokenContracts(LOCAL, (text) => log({ text }));
+      log({ text: 'Trustless Work ready: shops can choose its escrow at the till.', tone: 'ok' });
+    } catch (e) {
+      log({ text: (e as Error).message, tone: 'err' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className="page">
       <div className="desk">
@@ -172,6 +195,18 @@ export function Setup() {
             ))}
           </ol>
         </section>
+        {result && (
+          <section className="card stack-3">
+            <h2 className="subtitle">Trustless Work</h2>
+            <label className="field">
+              <span className="field__label">Testnet API key (dapp.trustlesswork.com)</span>
+              <input className="field__input mono" value={twKeyInput} onChange={(e) => setTwKeyInput(e.target.value)} autoComplete="off" spellCheck={false} />
+            </label>
+            <button type="button" className="btn btn--line" onClick={prepareTrustless} disabled={busy}>
+              Save the key and publish the token contracts
+            </button>
+          </section>
+        )}
         {result && (
           <section className="card stack-3">
             <h2 className="subtitle">chain.json</h2>

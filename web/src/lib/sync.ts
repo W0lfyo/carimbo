@@ -5,6 +5,7 @@
  */
 import { isLive, isReleasing, ledger } from './ledger';
 import { attachKey, balanceExists, latestRefund, travellerData } from './stellar';
+import { twEscrow } from './trustless';
 import type { CurrencyCode } from './types';
 import { PAYOUT_CURRENCIES } from './money';
 
@@ -24,7 +25,8 @@ async function tick() {
     if (cur && PAYOUT_CURRENCIES.includes(cur) && cur !== t.currency) ledger.setCurrency(cur, true);
 
     // 2. Claims this device created that the phone has attached since.
-    const attached = s.claims.filter((c) => c.status === 'locked' && c.balanceId && !c.travellerId && data[attachKey(c.balanceId)]);
+    const ref = (c: { balanceId?: string; contractId?: string }) => c.balanceId ?? c.contractId;
+    const attached = s.claims.filter((c) => c.status === 'locked' && ref(c) && !c.travellerId && data[attachKey(ref(c)!)]);
     if (attached.length) ledger.applyAttached(attached.map((c) => c.id));
 
     // 3. Open claims of the traveller whose balance has left the ledger: released or refused elsewhere.
@@ -36,6 +38,23 @@ async function tick() {
       const refund = await latestRefund(since);
       if (refund) ledger.applySettled(gone, refund);
       else ledger.applyClosed(gone);
+    }
+
+    // 4. Trustless Work escrows: read their state from the Trustless Work indexer.
+    const tw = ledger.get().claims.filter((c) => c.status === 'locked' && c.escrow === 'trustless' && c.contractId && c.travellerId === t.id);
+    const released: string[] = [];
+    const refused: string[] = [];
+    for (const c of tw) {
+      const e = await twEscrow(c.contractId!);
+      if (e?.released) released.push(c.id);
+      else if (e?.resolved) refused.push(c.id);
+    }
+    if (refused.length && !isReleasing()) ledger.applyClosed(refused);
+    if (released.length && !isReleasing()) {
+      const since = Math.min(...tw.filter((c) => released.includes(c.id)).map((c) => c.createdAt));
+      const refund = await latestRefund(since);
+      // Released but not converted yet: wait for the next tick.
+      if (refund) ledger.applySettled(released, refund);
     }
   } catch {
     /* Testnet hiccup: try again on the next tick */

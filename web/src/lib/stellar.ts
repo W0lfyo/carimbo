@@ -37,6 +37,7 @@ export interface ChainConfig {
   feeBps: number;
   issuer: string;
   // Shops added after the first deployment may be missing from older configs.
+  trustlessWork?: { apiKey: string };
   accounts: Record<Exclude<Role, ShopRole>, { publicKey: string; secret: string }> & Partial<Record<ShopRole, { publicKey: string; secret: string }>>;
 }
 
@@ -303,7 +304,9 @@ export async function latestRefund(sinceMs: number): Promise<{ hash: string; cod
     const at = Date.parse(r.created_at);
     if (at < sinceMs - 60_000) break;
     const fromCustoms = r.from === config!.accounts.customs.publicKey || r.source_account === config!.accounts.customs.publicKey;
-    if (!fromCustoms || r.to !== config!.accounts.traveller.publicKey) continue;
+    // Escrows released by Trustless Work: the traveller converts her euros herself.
+    const selfConversion = r.type === 'path_payment_strict_send' && r.from === config!.accounts.traveller.publicKey;
+    if ((!fromCustoms && !selfConversion) || r.to !== config!.accounts.traveller.publicKey) continue;
     const code = (Object.entries(ASSET_CODES).find(([, v]) => v === r.asset_code)?.[0] ?? null) as Code | null;
     if (!code) continue;
     return { hash: r.transaction_hash, code, amountMinor: Math.round(Number(r.amount) * 100), at };

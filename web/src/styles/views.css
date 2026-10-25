@@ -1057,3 +1057,45 @@
     order: -1;
   }
 }
+
+/* ---------- escrow choice ---------- */
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.segmented button {
+  flex: 1 1 200px;
+  min-height: 40px;
+  padding: 0 var(--s3);
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  font: inherit;
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.segmented button[aria-checked='true'] {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+.tag {
+  display: inline-block;
+  margin-left: var(--s2);
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--stamp, #4b3bd1) 12%, transparent);
+  color: var(--stamp, #4b3bd1);
+  font-size: 12px;
+  font-weight: 600;
+  vertical-align: middle;
+}

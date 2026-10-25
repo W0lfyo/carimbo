@@ -1,8 +1,9 @@
 import { useSyncExternalStore } from 'react';
 import type { Activity, ActivityKind, Claim, CurrencyCode, LedgerState } from './types';
 import { convert, feeOf, fmt, rateBetween, vatFromGross } from './money';
-import { chainAttach, chainOpen, chainReclaim, chainRelease, chainReject, chainSetCurrency, claimableInfo, getConfig, type Role } from './stellar';
+import { ASSET_CODES, balances, chainAttach, chainOpen, chainReclaim, chainRelease, chainReject, chainSetCurrency, claimableInfo, getConfig, type Role } from './stellar';
 import { countryOf, exportDeadline } from './countries';
+import { twConvert, twEnabled, twOpen, twRefuse, twRelease } from './trustless';
 
 /**
  * Simulated ledger. It mirrors what the Soroban escrow does on Stellar Testnet
@@ -166,7 +167,7 @@ export const isReleasing = () => releasing;
 /** Customs stamps the whole trip: every open claim is released in one atomic transaction. */
 async function clearTripInner(): Promise<void> {
   const t = state.traveller;
-  const mine = state.claims.filter((c) => c.travellerId === t.id && c.status === 'locked');
+  const mine = state.claims.filter((c) => c.travellerId === t.id && c.status === 'locked' && c.escrow !== 'trustless');
   if (mine.length === 0) return;
   const started = Date.now();
   // The fee is 0.5% of each currency group's total (exactly what the release transaction
@@ -247,6 +248,52 @@ async function clearTripInner(): Promise<void> {
   });
 }
 
+/** Claims escrowed on Trustless Work: customs approves and releases each, then the euros are converted on the DEX. */
+async function clearTripTrustless(): Promise<void> {
+  const t = state.traveller;
+  const mine = state.claims.filter((c) => c.travellerId === t.id && c.status === 'locked' && c.escrow === 'trustless' && c.contractId);
+  if (mine.length === 0) return;
+  const started = Date.now();
+  const groups = new Map<CurrencyCode, Claim[]>();
+  mine.forEach((c) => groups.set(c.currency, [...(groups.get(c.currency) ?? []), c]));
+  const paid = new Map<string, Claim>();
+  const log: Activity[] = [];
+  const traveller = getConfig()!.accounts.traveller.publicKey;
+  for (const [cur, list] of groups) {
+    const held = async () => Math.round(Number((await balances(traveller))[ASSET_CODES[cur]] ?? 0) * 100);
+    const before = await held();
+    let lastRelease = '';
+    for (const c of list) lastRelease = await twRelease(c.contractId!);
+    // Wait for Horizon to see the released euros.
+    let got = 0;
+    for (let i = 0; i < 10 && got <= 0; i++) {
+      got = (await held()) - before;
+      if (got <= 0) await pause(1500);
+    }
+    if (got <= 0) throw new Error('The escrow was released but the payment is not visible yet. Refresh in a moment.');
+    const conv = await twConvert(cur, got, t.currency);
+    const total = list.reduce((n, c) => n + c.vatCents, 0);
+    const rate = Math.round((conv.received / got) * 10_000) / 10_000;
+    let leftOut = conv.received;
+    let leftIn = got;
+    list.forEach((c, i) => {
+      const last = i === list.length - 1;
+      const share = last ? leftIn : Math.round((got * c.vatCents) / total);
+      const out = last ? leftOut : Math.round((conv.received * c.vatCents) / total);
+      leftIn -= share;
+      leftOut -= out;
+      paid.set(c.id, {
+        ...c,
+        status: 'refunded',
+        payout: { currency: t.currency, rate, feeCents: c.vatCents - share, amountMinor: out, seconds: Math.max(1, Math.round((Date.now() - started) / 1000)), at: Date.now(), tx: conv.hash ?? lastRelease },
+      });
+    });
+    log.push(activity('clear', `Customs approved and released ${list.length} Trustless Work ${list.length > 1 ? 'escrows' : 'escrow'}`, fmt(got, cur), lastRelease));
+    if (conv.hash) log.push(activity('convert', `Converted on the Stellar DEX, ${t.name} paid in ${t.currency}`, fmt(conv.received, t.currency), conv.hash));
+  }
+  commit({ ...state, stampedAt: Date.now(), claims: state.claims.map((c) => paid.get(c.id) ?? c), activity: [...log.reverse(), ...state.activity] });
+}
+
 /**
  * Every action goes through the Soroban escrow on Stellar Testnet when chain.json is
  * present, and falls back to a local simulation otherwise (same rules, fake hashes).
@@ -255,7 +302,7 @@ export const ledger = {
   get: () => state,
 
   /** `windowMs` shortens the export window, for the demo of an expired claim. */
-  async createSale(shopId: string, items: { item: string; paidMinor: number; vatRate: number }[], windowMs?: number): Promise<Claim> {
+  async createSale(shopId: string, items: { item: string; paidMinor: number; vatRate: number }[], windowMs?: number, engine: 'native' | 'trustless' = 'native'): Promise<Claim> {
     const now = Date.now();
     const shop = state.shops.find((s) => s.id === shopId)!;
     const country = countryOf(shop.country);
@@ -266,8 +313,15 @@ export const ledger = {
     const vatRate = lines[0].vatRate;
     const deadline = windowMs ? now + windowMs : exportDeadline(new Date(now), country.exportRule);
     let balanceId: string | undefined;
+    let contractId: string | undefined;
     let tx: string | undefined;
-    if (live()) {
+    const claimCode = code();
+    const trustless = engine === 'trustless' && live() && twEnabled();
+    if (trustless) {
+      const res = await twOpen(SHOP_ROLE[shopId], country.currency, vat, claimCode);
+      contractId = res.contractId;
+      tx = res.fundTx;
+    } else if (live()) {
       const res = await chainOpen(SHOP_ROLE[shopId], country.currency, vat, deadline);
       balanceId = res.balanceId;
       tx = res.hash;
@@ -276,7 +330,9 @@ export const ledger = {
     }
     const claim: Claim = {
       id: hex(8),
-      code: code(),
+      code: claimCode,
+      escrow: trustless ? 'trustless' : 'native',
+      contractId,
       shopId,
       item,
       currency: country.currency,
@@ -292,7 +348,10 @@ export const ledger = {
     commit({
       ...state,
       claims: [claim, ...state.claims],
-      activity: [activity('escrow', `${shop.name} locked the VAT in a claimable balance`, fmt(vat, claim.currency), tx), ...state.activity],
+      activity: [
+        activity('escrow', trustless ? `${shop.name} opened and funded a Trustless Work escrow` : `${shop.name} locked the VAT in a claimable balance`, fmt(vat, claim.currency), tx),
+        ...state.activity,
+      ],
     });
     return claim;
   },
@@ -307,7 +366,8 @@ export const ledger = {
     if (!claim || claim.status !== 'locked') return null;
     if (claim.travellerId === state.traveller.id) return claim;
     let tx: string | undefined;
-    if (live() && claim.balanceId) tx = (await chainAttach(claim.balanceId)).hash;
+    const ref = claim.balanceId ?? claim.contractId;
+    if (live() && ref) tx = (await chainAttach(ref)).hash;
     else await pause(600);
     commit({
       ...state,
@@ -333,6 +393,7 @@ export const ledger = {
     const existing = state.claims.find((c) => c.code === code);
     if (existing) return existing;
     const balanceId = q.get('cb') ?? undefined;
+    const contractId = q.get('tw') ?? undefined;
     const currency = q.get('c') as CurrencyCode | null;
     const vat = Number(q.get('v'));
     const shopId = q.get('s') ?? '';
@@ -354,6 +415,8 @@ export const ledger = {
       deadline: Number(q.get('d')),
       status: 'locked',
       balanceId,
+      contractId,
+      escrow: contractId ? 'trustless' : 'native',
     };
     commit({ ...state, claims: [claim, ...state.claims] });
     return claim;
@@ -422,6 +485,7 @@ export const ledger = {
     releasing = true;
     try {
       await clearTripInner();
+      await clearTripTrustless();
     } finally {
       releasing = false;
     }
@@ -432,9 +496,12 @@ export const ledger = {
     const mine = state.claims.filter((c) => c.travellerId === t.id && c.status === 'locked');
     if (mine.length === 0) return;
     let tx: string | undefined;
-    if (live() && mine.every((c) => c.balanceId))
-      tx = (await chainReject(mine.map((c) => ({ balanceId: c.balanceId!, currency: c.currency, vatMinor: c.vatCents, shop: SHOP_ROLE[c.shopId] })))).hash;
-    else await pause(400);
+    const native = mine.filter((c) => c.escrow !== 'trustless');
+    const tw = mine.filter((c) => c.escrow === 'trustless' && c.contractId);
+    if (live() && native.length && native.every((c) => c.balanceId))
+      tx = (await chainReject(native.map((c) => ({ balanceId: c.balanceId!, currency: c.currency, vatMinor: c.vatCents, shop: SHOP_ROLE[c.shopId] })))).hash;
+    for (const c of tw) tx = await twRefuse(c.contractId!, SHOP_ROLE[c.shopId], c.vatCents);
+    if (!live()) await pause(400);
     const total = mine.reduce((n, c) => n + convert(c.vatCents, c.currency, 'EUR'), 0);
     commit({
       ...state,
@@ -447,6 +514,7 @@ export const ledger = {
   async reclaim(claimId: string): Promise<string | undefined> {
     const claim = state.claims.find((c) => c.id === claimId);
     if (!claim || claim.status !== 'locked' || claim.deadline > Date.now()) return;
+    if (claim.escrow === 'trustless') throw new Error('A Trustless Work escrow goes back to the shop through customs’ dispute resolution.');
     let tx: string | undefined;
     if (live() && claim.balanceId) tx = (await chainReclaim(SHOP_ROLE[claim.shopId], claim.balanceId)).hash;
     const shop = state.shops.find((s) => s.id === claim.shopId);

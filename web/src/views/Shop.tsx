@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { ledger, useLedger } from '../lib/ledger';
+import { isLive, ledger, useLedger } from '../lib/ledger';
 import { CURRENCIES, MAX_EUR_MINOR, convert, fmt, inputAmount, parseAmount, shortDate, vatFromGross, type Code } from '../lib/money';
 import { COUNTRIES, countryOf, detectCountry, ruleText } from '../lib/countries';
 import type { Claim, ClaimStatus } from '../lib/types';
 import { QR } from '../components/QR';
 import { SHORT_WINDOW, clockTime, countdown, useNow } from '../lib/clock';
 import { txUrl } from '../lib/stellar';
+import { twEnabled } from '../lib/trustless';
 
 /** What each demo shop typically sells, to prefill the first line of the till. */
 const SAMPLE: Record<string, { item: string; amount: string }> = {
@@ -35,6 +36,7 @@ interface BasketLine {
 export function joinUrl(c: Claim): string {
   const q = new URLSearchParams({ join: c.code, s: c.shopId, i: c.item, c: c.currency, p: String(c.paidCents), v: String(c.vatCents), r: String(c.vatRate), d: String(c.deadline), t: String(c.createdAt) });
   if (c.balanceId) q.set('cb', c.balanceId);
+  if (c.contractId) q.set('tw', c.contractId);
   return `${location.origin}${location.pathname}#/traveller?${q.toString()}`;
 }
 
@@ -48,6 +50,8 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
   const sample = (id: string) => SAMPLE[id] ?? SAMPLE['loja-azul'];
   const [lines, setLines] = useState<BasketLine[]>(() => [{ id: 1, ...sample(initialShop), rate: country.rates[0].rate }]);
   const [shortWindow, setShortWindow] = useState(false);
+  const [engine, setEngine] = useState<'native' | 'trustless'>('native');
+  const canTrustless = isLive() && twEnabled();
   const [reclaiming, setReclaiming] = useState<string | null>(null);
   const [reclaimMsg, setReclaimMsg] = useState<{ text: string; tx?: string; error?: boolean } | null>(null);
   // Coming back to the till shows the sale still waiting for the traveller or customs.
@@ -193,7 +197,8 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
               .createSale(
                 shopId,
                 parsed.map((l) => ({ item: l.item.trim(), paidMinor: l.minor!, vatRate: l.rate })),
-                shortWindow ? DEMO_WINDOW_MS : undefined,
+                shortWindow && engine === 'native' ? DEMO_WINDOW_MS : undefined,
+                canTrustless ? engine : 'native',
               )
               .then(setCurrent)
               .catch((err: Error) => setFailure(`The escrow did not accept the sale: ${err.message}`))
@@ -261,6 +266,25 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
                   ? `Tax-free in ${country.name} needs at least ${fmt(country.minPurchase, cur)} on one receipt.`
                   : `${minText} For visitors living ${country.zone}: ${ruleText(country.exportRule)}.`}
           </p>
+          {canTrustless && (
+            <div className="field">
+              <span className="field__label">Escrow</span>
+              <div className="segmented" role="radiogroup" aria-label="Escrow">
+                <button type="button" role="radio" aria-checked={engine === 'native'} onClick={() => setEngine('native')}>
+                  Stellar claimable balance
+                </button>
+                <button type="button" role="radio" aria-checked={engine === 'trustless'} onClick={() => setEngine('trustless')}>
+                  Trustless Work escrow
+                </button>
+              </div>
+              <span className="field__hint">
+                {engine === 'native'
+                  ? 'Native escrow: the export deadline is enforced by the protocol, refund in one atomic transaction.'
+                  : 'Soroban escrow by Trustless Work: customs approves the milestone and releases it, then the DEX converts.'}
+              </span>
+            </div>
+          )}
+          {engine === 'native' && (
           <label className="check">
             <input type="checkbox" checked={shortWindow} onChange={(e) => setShortWindow(e.target.checked)} />
             <span>
@@ -268,8 +292,9 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
               <span className="muted small">Shortens the legal window so you can watch Stellar refuse a late stamp and return the VAT to the shop.</span>
             </span>
           </label>
+          )}
           <button type="submit" className="btn btn--go btn--block btn--big" disabled={!canLock || locking}>
-            {locking ? 'Locking VAT on Stellar…' : 'Lock VAT and show QR'}
+            {locking ? (engine === 'trustless' && canTrustless ? 'Opening the Trustless Work escrow…' : 'Locking VAT on Stellar…') : 'Lock VAT and show QR'}
           </button>
           {failure && <p className="field__hint field__hint--error">{failure}</p>}
         </form>
