@@ -14,7 +14,7 @@ export const EXPLORER = 'https://stellar.expert/explorer/testnet';
 export const horizon = new Horizon.Server(HORIZON_URL);
 
 /** Demo stablecoins, one per currency, all issued by the Carimbo test issuer. */
-export const ASSET_CODES: Record<Code, string> = {
+export const ASSET_CODES: Partial<Record<Code, string>> = {
   EUR: 'cEUR',
   USD: 'cUSD',
   GBP: 'cGBP',
@@ -81,8 +81,13 @@ export function getConfig(): ChainConfig | null {
 }
 
 export function asset(code: Code, issuer = config!.issuer): Asset {
-  return new Asset(ASSET_CODES[code], issuer);
+  const c = ASSET_CODES[code];
+  if (!c) throw new Error(`Carimbo has no ${code} stablecoin on Testnet yet.`);
+  return new Asset(c, issuer);
 }
+
+/** Can VAT in this currency be escrowed on Stellar Testnet today? */
+export const hasStablecoin = (code: Code) => !!ASSET_CODES[code];
 
 export function keypair(role: Role): Keypair {
   const acc = config!.accounts[role];

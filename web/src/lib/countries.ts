@@ -1,17 +1,14 @@
 /**
- * Tax-free rules by country. A shop belongs to one country, so its VAT rates,
- * minimum purchase, local currency and export window all come from here.
- *
- * Standard rates and minimums: checked October 2026 against public refund guides
- * (withprive.com country table, Wise, Japan NTA reform notes). Indicative: confirm
- * with each tax authority before production.
+ * Countries as the interface shows them. Every legal figure (VAT rates, minimum, export
+ * window, who is eligible) comes from taxFreeRules.ts; this file only adds what is
+ * printed or guessed: the flag, the text around the customs stamp, the main airport and
+ * the time zones used to guess a shop's country.
  */
+import { TAX_FREE_RULES, type ExportDeadline, type TaxFreeRules } from './taxFreeRules';
+import type { Code } from './money';
 
-export type LocalCurrency = 'EUR' | 'CHF' | 'JPY' | 'SGD' | 'KRW';
-
-export type ExportRule =
-  | { kind: 'months-end'; months: number } // EU: end of the Nth month after the month of purchase
-  | { kind: 'days'; days: number }; // e.g. Japan: 90 days to confirm export
+/** The 27 member states, for rules whose zone is "EU". */
+export const EU27 = ['AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE'];
 
 export interface VatRate {
   rate: number;
@@ -21,264 +18,55 @@ export interface VatRate {
 export interface Country {
   code: string;
   name: string;
-  flag: string; // regional indicator pair, decorative only
-  currency: LocalCurrency;
-  rates: VatRate[]; // first one is the standard rate
-  minPurchase: number; // in local minor units (×100), 0 = no minimum
-  exportRule: ExportRule;
-  zone: string; // who counts as a foreign resident
+  flag: string; // decorative only
+  currency: Code;
+  rates: VatRate[]; // from the rules; the first one is the standard rate
+  zone: string; // who counts as a foreign resident, in words
   stamp: string; // text around the customs stamp, in the local language
   airport: string; // main departure airport, printed in the stamp
-  timezones: string[]; // used to guess the shop's country on first launch
+  timezones: string[];
+  rules: TaxFreeRules;
 }
 
-const EU = 'outside the EU';
-const EU_3M: ExportRule = { kind: 'months-end', months: 3 };
+const LOOK: Record<string, { flag: string; stamp: string; airport: string; timezones: string[] }> = {
+  PT: { flag: '🇵🇹', airport: 'LIS', stamp: 'ALFÂNDEGA DE LISBOA ✦ SAÍDA DA UE ✦', timezones: ['Europe/Lisbon', 'Atlantic/Madeira', 'Atlantic/Azores'] },
+  ES: { flag: '🇪🇸', airport: 'MAD', stamp: 'ADUANA DE ESPAÑA ✦ SALIDA DE LA UE ✦', timezones: ['Europe/Madrid', 'Atlantic/Canary'] },
+  FR: { flag: '🇫🇷', airport: 'CDG', stamp: 'DOUANE FRANÇAISE ✦ SORTIE DE L’UE ✦', timezones: ['Europe/Paris'] },
+  IT: { flag: '🇮🇹', airport: 'FCO', stamp: 'AGENZIA DOGANE ✦ USCITA DALLA UE ✦', timezones: ['Europe/Rome'] },
+  DE: { flag: '🇩🇪', airport: 'FRA', stamp: 'DEUTSCHER ZOLL ✦ AUSFUHR AUS DER EU ✦', timezones: ['Europe/Berlin'] },
+  NL: { flag: '🇳🇱', airport: 'AMS', stamp: 'DOUANE NEDERLAND ✦ UITVOER UIT DE EU ✦', timezones: ['Europe/Amsterdam'] },
+  BE: { flag: '🇧🇪', airport: 'BRU', stamp: 'DOUANE BELGE ✦ SORTIE DE L’UE ✦', timezones: ['Europe/Brussels'] },
+  AT: { flag: '🇦🇹', airport: 'VIE', stamp: 'ZOLLAMT ÖSTERREICH ✦ AUSFUHR AUS DER EU ✦', timezones: ['Europe/Vienna'] },
+  IE: { flag: '🇮🇪', airport: 'DUB', stamp: 'REVENUE CUSTOMS ✦ EXPORT FROM THE EU ✦', timezones: ['Europe/Dublin'] },
+  GR: { flag: '🇬🇷', airport: 'ATH', stamp: 'TELONEIO ELLADAS ✦ EXODOS APO TIN EE ✦', timezones: ['Europe/Athens'] },
+  FI: { flag: '🇫🇮', airport: 'HEL', stamp: 'TULLI FINLAND ✦ VIENTI EU:STA ✦', timezones: ['Europe/Helsinki'] },
+  SE: { flag: '🇸🇪', airport: 'ARN', stamp: 'TULLVERKET ✦ EXPORT FRÅN EU ✦', timezones: ['Europe/Stockholm'] },
+  DK: { flag: '🇩🇰', airport: 'CPH', stamp: 'TOLDSTYRELSEN ✦ UDFØRSEL FRA EU ✦', timezones: ['Europe/Copenhagen'] },
+  CH: { flag: '🇨🇭', airport: 'ZRH', stamp: 'ZOLL DOUANE DOGANA ✦ AUSFUHR ✦', timezones: ['Europe/Zurich'] },
+  NO: { flag: '🇳🇴', airport: 'OSL', stamp: 'TOLLETATEN ✦ UTFØRSEL ✦', timezones: ['Europe/Oslo'] },
+  GB: { flag: '🇬🇧', airport: 'LHR', stamp: 'HM CUSTOMS ✦ EXPORT ✦', timezones: ['Europe/London'] },
+  JP: { flag: '🇯🇵', airport: 'NRT', stamp: 'JAPAN CUSTOMS ✦ 税関 ✦ EXPORT ✦', timezones: ['Asia/Tokyo'] },
+  KR: { flag: '🇰🇷', airport: 'ICN', stamp: 'KOREA CUSTOMS ✦ 관세청 ✦ EXPORT ✦', timezones: ['Asia/Seoul'] },
+  SG: { flag: '🇸🇬', airport: 'SIN', stamp: 'SINGAPORE CUSTOMS ✦ GST REFUND ✦', timezones: ['Asia/Singapore'] },
+  TH: { flag: '🇹🇭', airport: 'BKK', stamp: 'THAI CUSTOMS ✦ ศุลกากร ✦ VAT REFUND ✦', timezones: ['Asia/Bangkok'] },
+  AU: { flag: '🇦🇺', airport: 'SYD', stamp: 'AUSTRALIAN BORDER FORCE ✦ TRS ✦', timezones: ['Australia/Sydney', 'Australia/Melbourne', 'Australia/Brisbane', 'Australia/Perth', 'Australia/Adelaide'] },
+  TR: { flag: '🇹🇷', airport: 'IST', stamp: 'GÜMRÜK ✦ İHRACAT ✦ TAX FREE ✦', timezones: ['Europe/Istanbul'] },
+};
 
-export const COUNTRIES: Country[] = [
-  {
-    code: 'PT',
-    airport: 'LIS',
-    name: 'Portugal',
-    flag: '🇵🇹',
-    currency: 'EUR',
-    rates: [
-      { rate: 23, label: 'Standard, 23%' },
-      { rate: 13, label: 'Intermediate, 13%' },
-      { rate: 6, label: 'Reduced, 6%' },
-    ],
-    minPurchase: 5000,
-    exportRule: EU_3M,
-    zone: EU,
-    stamp: 'ALFÂNDEGA DE LISBOA ✦ SAÍDA DA UE ✦',
-    timezones: ['Europe/Lisbon', 'Atlantic/Madeira', 'Atlantic/Azores'],
-  },
-  {
-    code: 'ES',
-    airport: 'MAD',
-    name: 'Spain',
-    flag: '🇪🇸',
-    currency: 'EUR',
-    rates: [
-      { rate: 21, label: 'Standard, 21%' },
-      { rate: 10, label: 'Reduced, 10%' },
-      { rate: 4, label: 'Super-reduced, 4%' },
-    ],
-    minPurchase: 0,
-    exportRule: EU_3M,
-    zone: EU,
-    stamp: 'ADUANA DE ESPAÑA ✦ SALIDA DE LA UE ✦',
-    timezones: ['Europe/Madrid', 'Atlantic/Canary'],
-  },
-  {
-    code: 'FR',
-    airport: 'CDG',
-    name: 'France',
-    flag: '🇫🇷',
-    currency: 'EUR',
-    rates: [
-      { rate: 20, label: 'Standard, 20%' },
-      { rate: 10, label: 'Intermediate, 10%' },
-      { rate: 5.5, label: 'Reduced, 5.5%' },
-      { rate: 2.1, label: 'Super-reduced, 2.1%' },
-    ],
-    minPurchase: 10001,
-    exportRule: EU_3M,
-    zone: EU,
-    stamp: 'DOUANE FRANÇAISE ✦ SORTIE DE L’UE ✦',
-    timezones: ['Europe/Paris'],
-  },
-  {
-    code: 'IT',
-    airport: 'FCO',
-    name: 'Italy',
-    flag: '🇮🇹',
-    currency: 'EUR',
-    rates: [
-      { rate: 22, label: 'Standard, 22%' },
-      { rate: 10, label: 'Reduced, 10%' },
-      { rate: 5, label: 'Reduced, 5%' },
-      { rate: 4, label: 'Super-reduced, 4%' },
-    ],
-    minPurchase: 7001,
-    exportRule: EU_3M,
-    zone: EU,
-    stamp: 'AGENZIA DOGANE ✦ USCITA DALLA UE ✦',
-    timezones: ['Europe/Rome'],
-  },
-  {
-    code: 'DE',
-    airport: 'FRA',
-    name: 'Germany',
-    flag: '🇩🇪',
-    currency: 'EUR',
-    rates: [
-      { rate: 19, label: 'Standard, 19%' },
-      { rate: 7, label: 'Reduced, 7%' },
-    ],
-    minPurchase: 5001,
-    exportRule: EU_3M,
-    zone: EU,
-    stamp: 'DEUTSCHER ZOLL ✦ AUSFUHR AUS DER EU ✦',
-    timezones: ['Europe/Berlin'],
-  },
-  {
-    code: 'NL',
-    airport: 'AMS',
-    name: 'Netherlands',
-    flag: '🇳🇱',
-    currency: 'EUR',
-    rates: [
-      { rate: 21, label: 'Standard, 21%' },
-      { rate: 9, label: 'Reduced, 9%' },
-    ],
-    minPurchase: 5000,
-    exportRule: EU_3M,
-    zone: EU,
-    stamp: 'DOUANE NEDERLAND ✦ UITVOER UIT DE EU ✦',
-    timezones: ['Europe/Amsterdam'],
-  },
-  {
-    code: 'BE',
-    airport: 'BRU',
-    name: 'Belgium',
-    flag: '🇧🇪',
-    currency: 'EUR',
-    rates: [
-      { rate: 21, label: 'Standard, 21%' },
-      { rate: 12, label: 'Intermediate, 12%' },
-      { rate: 6, label: 'Reduced, 6%' },
-    ],
-    minPurchase: 12500,
-    exportRule: EU_3M,
-    zone: EU,
-    stamp: 'DOUANE BELGE ✦ SORTIE DE L’UE ✦',
-    timezones: ['Europe/Brussels'],
-  },
-  {
-    code: 'AT',
-    airport: 'VIE',
-    name: 'Austria',
-    flag: '🇦🇹',
-    currency: 'EUR',
-    rates: [
-      { rate: 20, label: 'Standard, 20%' },
-      { rate: 13, label: 'Reduced, 13%' },
-      { rate: 10, label: 'Reduced, 10%' },
-    ],
-    minPurchase: 7501,
-    exportRule: EU_3M,
-    zone: EU,
-    stamp: 'ZOLLAMT ÖSTERREICH ✦ AUSFUHR AUS DER EU ✦',
-    timezones: ['Europe/Vienna'],
-  },
-  {
-    code: 'IE',
-    airport: 'DUB',
-    name: 'Ireland',
-    flag: '🇮🇪',
-    currency: 'EUR',
-    rates: [
-      { rate: 23, label: 'Standard, 23%' },
-      { rate: 13.5, label: 'Reduced, 13.5%' },
-      { rate: 9, label: 'Second reduced, 9%' },
-    ],
-    minPurchase: 0,
-    exportRule: EU_3M,
-    zone: EU,
-    stamp: 'REVENUE CUSTOMS ✦ EXPORT FROM THE EU ✦',
-    timezones: ['Europe/Dublin'],
-  },
-  {
-    code: 'GR',
-    airport: 'ATH',
-    name: 'Greece',
-    flag: '🇬🇷',
-    currency: 'EUR',
-    rates: [
-      { rate: 24, label: 'Standard, 24%' },
-      { rate: 13, label: 'Reduced, 13%' },
-      { rate: 6, label: 'Super-reduced, 6%' },
-    ],
-    minPurchase: 5000,
-    exportRule: EU_3M,
-    zone: EU,
-    stamp: 'TELONEIO ELLADAS ✦ EXODOS APO TIN EE ✦',
-    timezones: ['Europe/Athens'],
-  },
-  {
-    code: 'FI',
-    airport: 'HEL',
-    name: 'Finland',
-    flag: '🇫🇮',
-    currency: 'EUR',
-    rates: [{ rate: 25.5, label: 'Standard, 25.5%' }],
-    minPurchase: 4000,
-    exportRule: EU_3M,
-    zone: EU,
-    stamp: 'TULLI FINLAND ✦ VIENTI EU:STA ✦',
-    timezones: ['Europe/Helsinki'],
-  },
-  {
-    code: 'CH',
-    airport: 'ZRH',
-    name: 'Switzerland',
-    flag: '🇨🇭',
-    currency: 'CHF',
-    rates: [
-      { rate: 8.1, label: 'Standard, 8.1%' },
-      { rate: 3.8, label: 'Accommodation, 3.8%' },
-      { rate: 2.6, label: 'Reduced, 2.6%' },
-    ],
-    minPurchase: 30000,
-    exportRule: { kind: 'days', days: 30 },
-    zone: 'outside Switzerland',
-    stamp: 'ZOLL DOUANE DOGANA ✦ AUSFUHR ✦',
-    timezones: ['Europe/Zurich'],
-  },
-  {
-    code: 'JP',
-    airport: 'NRT',
-    name: 'Japan',
-    flag: '🇯🇵',
-    currency: 'JPY',
-    rates: [
-      { rate: 10, label: 'Standard, 10%' },
-      { rate: 8, label: 'Reduced, 8%' },
-    ],
-    minPurchase: 500000,
-    exportRule: { kind: 'days', days: 90 },
-    zone: 'outside Japan',
-    stamp: 'JAPAN CUSTOMS ✦ 税関 ✦ EXPORT ✦',
-    timezones: ['Asia/Tokyo'],
-  },
-  {
-    code: 'SG',
-    airport: 'SIN',
-    name: 'Singapore',
-    flag: '🇸🇬',
-    currency: 'SGD',
-    rates: [{ rate: 9, label: 'GST, 9%' }],
-    minPurchase: 10000,
-    exportRule: { kind: 'months-end', months: 2 },
-    zone: 'outside Singapore',
-    stamp: 'SINGAPORE CUSTOMS ✦ GST REFUND ✦',
-    timezones: ['Asia/Singapore'],
-  },
-  {
-    code: 'KR',
-    airport: 'ICN',
-    name: 'South Korea',
-    flag: '🇰🇷',
-    currency: 'KRW',
-    rates: [{ rate: 10, label: 'Standard, 10%' }],
-    minPurchase: 1500000,
-    exportRule: { kind: 'months-end', months: 3 },
-    zone: 'outside Korea',
-    stamp: 'KOREA CUSTOMS ✦ 관세청 ✦ EXPORT ✦',
-    timezones: ['Asia/Seoul'],
-  },
-];
+const zoneText = (r: TaxFreeRules) => (r.eligibility.residentOutside === 'EU' ? 'outside the EU' : `outside ${r.name}`);
+
+export const COUNTRIES: Country[] = Object.values(TAX_FREE_RULES).map((r) => {
+  const look = LOOK[r.country] ?? { flag: '', stamp: `${r.name.toUpperCase()} CUSTOMS ✦ EXPORT ✦`, airport: '', timezones: [] };
+  return {
+    code: r.country,
+    name: r.name,
+    currency: r.currency as Code,
+    rates: r.vatRates.map((v) => ({ rate: v.rate, label: `${v.label}, ${v.rate}%` })),
+    zone: zoneText(r),
+    rules: r,
+    ...look,
+  };
+});
 
 export function countryOf(code: string): Country {
   return COUNTRIES.find((c) => c.code === code) ?? COUNTRIES[0];
@@ -288,22 +76,34 @@ export function countryOf(code: string): Country {
 export function detectCountry(): Country {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return COUNTRIES.find((c) => c.timezones.includes(tz)) ?? COUNTRIES[0];
+    return COUNTRIES.find((c) => c.timezones.includes(tz) && c.rules.scheme !== 'none') ?? COUNTRIES[0];
   } catch {
     return COUNTRIES[0];
   }
 }
 
-/** Deadline to take the goods out of the country. */
-export function exportDeadline(from: Date, rule: ExportRule): number {
-  if (rule.kind === 'days') return from.getTime() + rule.days * 86_400_000;
-  return new Date(from.getFullYear(), from.getMonth() + rule.months + 1, 0, 23, 59, 59).getTime();
+export function ruleText(d: ExportDeadline | null): string {
+  if (!d) return 'no export window: there is no tax-free scheme';
+  if (d.kind === 'days') return `${d.days} days to take the goods out`;
+  if (d.kind === 'months') return `${d.months} ${d.months > 1 ? 'months' : 'month'} to take the goods out`;
+  const ord = ['first', 'second', 'third'][d.months - 1] ?? `${d.months}th`;
+  return `until the end of the ${ord} month after purchase`;
 }
 
-export function ruleText(rule: ExportRule): string {
-  return rule.kind === 'days' ? `${rule.days} days to confirm export` : `until the end of the ${ordinal(rule.months)} month after purchase`;
+/** A country's name in English from its ISO code, for the residence list. */
+export function countryName(code: string): string {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'region' }).of(code) ?? code;
+  } catch {
+    return code;
+  }
 }
 
-function ordinal(n: number): string {
-  return n === 1 ? 'first' : n === 2 ? 'second' : n === 3 ? 'third' : `${n}th`;
-}
+/** Residence choices: every country in the rules plus common origins of visitors, sorted by name. */
+export const RESIDENCE_CODES: string[] = Array.from(
+  new Set([
+    ...EU27,
+    ...Object.keys(TAX_FREE_RULES),
+    'US', 'CA', 'MX', 'BR', 'AR', 'CL', 'CO', 'PE', 'CN', 'HK', 'TW', 'IN', 'ID', 'MY', 'PH', 'VN', 'AE', 'SA', 'QA', 'IL', 'EG', 'MA', 'ZA', 'NG', 'KE', 'NZ', 'UA', 'RS', 'IS', 'AL',
+  ]),
+).sort((a, b) => countryName(a).localeCompare(countryName(b)));

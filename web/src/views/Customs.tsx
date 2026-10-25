@@ -5,6 +5,8 @@ import { countryOf } from '../lib/countries';
 import { Stamp } from '../components/Stamp';
 import { SHORT_WINDOW, clockTime, countdown, useNow } from '../lib/clock';
 import { ChainError, txUrl } from '../lib/stellar';
+import { processSteps } from '../lib/eligibility';
+import { RulesNote } from '../components/RulesNote';
 
 export function CustomsView({ compact = false }: { compact?: boolean }) {
   const s = useLedger();
@@ -141,7 +143,7 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
                   <span className="checks__ok" aria-hidden="true">✓</span>
                   <span>
                     <strong>Lives {countryOf(s.shops.find((x) => x.id === open[0]?.shopId)?.country ?? 'PT').zone}</strong>
-                    <span className="muted small">Proof from her passport chip. No passport data stored.</span>
+                    <span className="muted small">Declared on her phone. Check the passport at the desk; no passport data is stored.</span>
                   </span>
                 </li>
                 <li>
@@ -227,7 +229,21 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
                   )}
                 </p>
               )}
-              <p className="muted small">Your signature releases the escrow on Stellar. The traveller is paid in her currency within seconds.</p>
+              {(() => {
+                const rules = countryOf(shopOf(open[0].shopId).country).rules;
+                return (
+                  <div className="stack-2">
+                    <strong className="small">How it works in {rules.name}</strong>
+                    <ol className="process">
+                      {processSteps(rules).map((x) => (
+                        <li key={x}>{x}</li>
+                      ))}
+                      <li>With Carimbo, your signature releases the escrow on Stellar and the traveller is paid in her currency within seconds.</li>
+                    </ol>
+                    <RulesNote rules={rules} />
+                  </div>
+                );
+              })()}
             </>
           ) : lastStamp ? (
             <div className="cleared">

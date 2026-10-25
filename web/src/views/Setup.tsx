@@ -121,7 +121,7 @@ export function Setup() {
           await fund(pk);
           held = await balances(pk);
         }
-        const missing = LOCAL.filter((c) => held![ASSET_CODES[c]] === undefined);
+        const missing = LOCAL.filter((c) => held![ASSET_CODES[c]!] === undefined);
         if (missing.length) {
           const hash = await submitClassic(keypair(r), missing.map((c) => Operation.changeTrust({ asset: asset(c) })));
           log({ text: `${r}: ${missing.length} trustlines`, href: txUrl(hash) });

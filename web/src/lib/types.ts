@@ -35,7 +35,7 @@ export interface Claim {
   contractId?: string; // the Trustless Work escrow contract, when escrow is 'trustless'
   escrowUsdc?: number; // USDC minor units held by that escrow
   archived?: boolean; // hidden from the traveller once she starts a new trip
-  lines?: { item: string; paidMinor: number; vatRate: number; vatMinor: number }[]; // receipt lines
+  lines?: { item: string; paidMinor: number; vatRate: number; vatMinor: number; category?: import('./taxFreeRules').PurchaseCategory }[]; // receipt lines
 }
 
 export interface Payout {
@@ -59,6 +59,7 @@ export interface Traveller {
   currency: CurrencyCode;
   tripCode: string;
   residency: 'non-eu-proven' | 'unproven';
+  profile?: import('./eligibility').TravellerProfile; // declared before the first receipt is added
 }
 
 export type ActivityKind = 'escrow' | 'join' | 'clear' | 'convert' | 'reject' | 'reclaim';

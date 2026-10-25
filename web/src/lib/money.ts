@@ -3,7 +3,7 @@
  * ("minor units", even for yen and won), so the arithmetic is the same everywhere.
  */
 
-export type Code = 'EUR' | 'USD' | 'GBP' | 'BRL' | 'JPY' | 'CNY' | 'CHF' | 'SGD' | 'KRW';
+export type Code = 'EUR' | 'USD' | 'GBP' | 'BRL' | 'JPY' | 'CNY' | 'CHF' | 'SGD' | 'KRW' | 'SEK' | 'DKK' | 'NOK' | 'THB' | 'AUD' | 'TRY';
 
 /** Indicative cross rates (1 EUR = perEur × currency). On Stellar the DEX path quote replaces them. */
 export const CURRENCIES: Record<Code, { name: string; symbol: string; perEur: number; decimals: number }> = {
@@ -16,6 +16,12 @@ export const CURRENCIES: Record<Code, { name: string; symbol: string; perEur: nu
   CHF: { name: 'Swiss francs', symbol: 'CHF ', perEur: 0.93, decimals: 2 },
   SGD: { name: 'Singapore dollars', symbol: 'S$', perEur: 1.5, decimals: 2 },
   KRW: { name: 'Korean won', symbol: '₩', perEur: 1600, decimals: 0 },
+  SEK: { name: 'Swedish kronor', symbol: 'SEK ', perEur: 11, decimals: 2 },
+  DKK: { name: 'Danish kroner', symbol: 'DKK ', perEur: 7.46, decimals: 2 },
+  NOK: { name: 'Norwegian kroner', symbol: 'NOK ', perEur: 11.6, decimals: 2 },
+  THB: { name: 'Thai baht', symbol: '฿', perEur: 38, decimals: 2 },
+  AUD: { name: 'Australian dollars', symbol: 'A$', perEur: 1.77, decimals: 2 },
+  TRY: { name: 'Turkish lira', symbol: '₺', perEur: 48, decimals: 2 },
 };
 
 /** Currencies a traveller can be refunded in. */
@@ -92,7 +98,7 @@ export const MAX_EUR_MINOR = 100_000_000;
  * "12 400" and a leading currency symbol; rejects signs, exponents and anything else.
  */
 export function parseAmount(input: string): number | null {
-  const t = input.trim().replace(/^(€|\$|£|¥|₩|CHF|S\$|CN¥|R\$)\s*/, '').replace(/\s/g, '');
+  const t = input.trim().replace(/^(€|\$|£|¥|₩|CHF|S\$|CN¥|R\$|A\$|฿|₺|SEK|DKK|NOK)\s*/, '').replace(/\s/g, '');
   let normalized: string;
   if (/^\d{1,3}(,\d{3})+(\.\d{1,2})?$/.test(t)) normalized = t.replace(/,/g, ''); // 12,400.50
   else if (/^\d+([.,]\d{1,2})?$/.test(t)) normalized = t.replace(',', '.'); // 400 / 400.5 / 400,50

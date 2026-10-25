@@ -2,7 +2,13 @@ import { useSyncExternalStore } from 'react';
 import type { Activity, ActivityKind, Claim, CurrencyCode, LedgerState } from './types';
 import { convert, feeOf, fmt, rateBetween, vatFromGross } from './money';
 import { balances, chainAttach, chainOpen, chainReclaim, chainRelease, chainReject, chainSetCurrency, claimableInfo, getConfig, type Role } from './stellar';
-import { countryOf, exportDeadline } from './countries';
+import { countryOf } from './countries';
+import { exportDeadline } from './taxFreeRules';
+import type { TravellerProfile } from './eligibility';
+import type { PurchaseCategory } from './taxFreeRules';
+
+/** Export deadline of a purchase under its country's rules (ms). */
+const deadlineOf = (countryCode: string, at: number) => exportDeadline(countryOf(countryCode).rules, new Date(at))?.getTime() ?? at;
 import { twConvert, twEnabled, twOpen, twRefuse, twRelease } from './trustless';
 
 /**
@@ -65,7 +71,7 @@ function seed(): LedgerState {
         vatRate: 23,
         vatCents: vatFromGross(24600, 23),
         createdAt: c1Created,
-        deadline: exportDeadline(new Date(c1Created), pt.exportRule),
+        deadline: deadlineOf(pt.code, c1Created),
         status: 'refunded',
         travellerId: 'someone-else',
       },
@@ -79,7 +85,7 @@ function seed(): LedgerState {
         vatRate: 23,
         vatCents: vatFromGross(10000, 23),
         createdAt: june,
-        deadline: exportDeadline(new Date(june), pt.exportRule),
+        deadline: deadlineOf(pt.code, june),
         status: 'locked',
         travellerId: 'someone-else-2',
       },
@@ -295,7 +301,7 @@ export const ledger = {
   get: () => state,
 
   /** `windowMs` shortens the export window, for the demo of an expired claim. */
-  async createSale(shopId: string, items: { item: string; paidMinor: number; vatRate: number }[], windowMs?: number, engine: 'native' | 'trustless' = 'native'): Promise<Claim> {
+  async createSale(shopId: string, items: { item: string; paidMinor: number; vatRate: number; category?: PurchaseCategory }[], windowMs?: number, engine: 'native' | 'trustless' = 'native'): Promise<Claim> {
     const now = Date.now();
     const shop = state.shops.find((s) => s.id === shopId)!;
     const country = countryOf(shop.country);
@@ -304,7 +310,7 @@ export const ledger = {
     const paidMinor = lines.reduce((n, l) => n + l.paidMinor, 0);
     const item = lines.length > 1 ? `${lines[0].item} + ${lines.length - 1} more` : lines[0].item;
     const vatRate = lines[0].vatRate;
-    const deadline = windowMs ? now + windowMs : exportDeadline(new Date(now), country.exportRule);
+    const deadline = windowMs ? now + windowMs : deadlineOf(country.code, now);
     let balanceId: string | undefined;
     let contractId: string | undefined;
     let escrowUsdc: number | undefined;
@@ -350,6 +356,11 @@ export const ledger = {
       ],
     });
     return claim;
+  },
+
+  /** The traveller's declaration, kept on this device only (no passport number). */
+  setProfile(profile: TravellerProfile) {
+    commit({ ...state, traveller: { ...state.traveller, profile } });
   },
 
   setShopCountry(shopId: string, countryCode: string) {

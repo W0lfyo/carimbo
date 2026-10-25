@@ -79,6 +79,7 @@ export function App() {
           </div>
         </main>
       )}
+      <footer className="legal-footer">Information only, not legal or tax advice.</footer>
     </div>
   );
 }

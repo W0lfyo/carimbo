@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ledger, useLedger } from '../lib/ledger';
-import { CURRENCIES, PAYOUT_CURRENCIES, convert, fmt, fmtBare, fmtPlain } from '../lib/money';
+import { CURRENCIES, PAYOUT_CURRENCIES, convert, fmt, fmtBare, fmtPlain, shortDate } from '../lib/money';
 import { countryOf } from '../lib/countries';
 import { txUrl } from '../lib/stellar';
 import type { CurrencyCode } from '../lib/types';
@@ -11,6 +11,11 @@ import { QR } from '../components/QR';
 import { Stamp } from '../components/Stamp';
 import { SplitFlap } from '../components/SplitFlap';
 import { biometricName, hasPasskeyDevice, passkeyReady, verifyTraveller } from '../lib/passkey';
+import { checkPurchase, type Purchase } from '../lib/eligibility';
+import { countryName } from '../lib/countries';
+import { ProfileForm } from '../components/ProfileForm';
+import { RulesNote } from '../components/RulesNote';
+import type { Claim } from '../lib/types';
 
 type Screen = 'trip' | 'airport';
 
@@ -43,6 +48,15 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
   const expired = mine.filter((c) => c.status === 'reclaimed');
   const pending = joinCode ? s.claims.find((c) => c.code === joinCode && c.status === 'locked' && c.travellerId !== t.id) : undefined;
   const shopOf = (id: string) => s.shops.find((x) => x.id === id)!;
+  const rulesOf = (c: Claim) => countryOf(shopOf(c.shopId).country).rules;
+  const purchaseOf = (c: Claim): Purchase => ({
+    id: c.id,
+    shopId: c.shopId,
+    shopName: shopOf(c.shopId).name,
+    date: new Date(c.createdAt),
+    lines: (c.lines ?? [{ item: c.item, paidMinor: c.paidCents, vatRate: c.vatRate, vatMinor: c.vatCents }]).map((l) => ({ gross: l.paidMinor / 100, vatRate: l.vatRate, category: 'category' in l ? l.category : undefined, label: l.item })),
+  });
+  const [editingProfile, setEditingProfile] = useState(false);
 
   // A phone that scanned a QR from another device imports the claim from the link.
   const known = joinCode ? s.claims.some((c) => c.code === joinCode) : true;
@@ -66,7 +80,7 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
     if (open.length === 0) setScreen('trip');
   }, [open.length]);
 
-  async function join(codeToJoin: string) {
+  async function join(codeToJoin: string, companions: string[] = []) {
     setBusy(true);
     setError('');
     // The traveller confirms with Face ID / Touch ID / Windows Hello before her account signs.
@@ -80,6 +94,8 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
     let ok = null;
     try {
       ok = await ledger.join(codeToJoin);
+      // Receipts from the same shop that only qualify together are added together.
+      for (const code of companions) await ledger.join(code);
     } catch (err) {
       setBusy(false);
       setError(`Stellar did not accept the claim: ${(err as Error).message}`);
@@ -107,8 +123,87 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
   }
 
   // ---------- 1. joining from a shop QR ----------
+  if ((pending && !t.profile) || editingProfile) {
+    const ref = pending ?? open[0];
+    const rules = ref ? rulesOf(ref) : countryOf('PT').rules;
+    return (
+      <div className="phone-screen phone-screen--paper">
+        <div className="brandline">
+          <LogoMark />
+          <span>Carimbo</span>
+        </div>
+        <h1 className="headline">A few details first.</h1>
+        <p className="lede">Only what {rules.name}’s tax-free rules need, to show you the refunds you are entitled to.</p>
+        <ProfileForm
+          rules={rules}
+          initial={t.profile}
+          onSave={(p) => {
+            ledger.setProfile(p);
+            setEditingProfile(false);
+          }}
+          onCancel={t.profile ? () => setEditingProfile(false) : undefined}
+        />
+        <RulesNote rules={rules} />
+      </div>
+    );
+  }
+
   if (pending) {
     const shop = shopOf(pending.shopId);
+    const rules = rulesOf(pending);
+    const today = new Date();
+    // Receipts this phone knows from the same shop and day, not added yet: they may add up.
+    const sameShop = s.claims.filter((c) => c.id !== pending.id && c.shopId === pending.shopId && c.status === 'locked' && !c.travellerId && new Date(c.createdAt).toDateString() === new Date(pending.createdAt).toDateString());
+    const pool = [...open, ...sameShop, pending].map(purchaseOf);
+    const verdict = checkPurchase(rules, t.profile!, purchaseOf(pending), pool, today);
+    const companions = verdict.eligible ? sameShop.filter((c) => checkPurchase(rules, t.profile!, purchaseOf(c), pool, today).eligible).map((c) => c.code) : [];
+    if (!verdict.eligible) {
+      return (
+        <div className="phone-screen phone-screen--paper">
+          <div className="brandline">
+            <LogoMark />
+            <span>Carimbo</span>
+          </div>
+          <h1 className="headline">This receipt can’t be refunded yet.</h1>
+          <div className="receipt">
+            <div className="receipt__row">
+              <strong>{shop.name}</strong>
+              <span className="muted">{shop.area}</span>
+            </div>
+            <div className="receipt__row muted">
+              <span>{pending.item}</span>
+              <span className="mono">{fmtPlain(pending.paidCents, pending.currency)}</span>
+            </div>
+          </div>
+          <div className="verdict verdict--no" role="alert">
+            <strong>Why</strong>
+            <ul>
+              {verdict.reasons.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+            {verdict.fixes.length > 0 && (
+              <>
+                <strong>What would fix it</strong>
+                <ul>
+                  {verdict.fixes.map((r) => (
+                    <li key={r}>{r}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+          <RulesNote rules={rules} />
+          <div className="grow" />
+          <button type="button" className="btn btn--line btn--block" onClick={() => setEditingProfile(true)}>
+            Check my details
+          </button>
+          <a className="textlink" href="#/traveller">
+            Back to my trip
+          </a>
+        </div>
+      );
+    }
     return (
       <div className="phone-screen phone-screen--paper">
         <div className="brandline">
@@ -132,8 +227,19 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
           <span className="muted">VAT you get back</span>
           <span className="mono receipt__big">{fmt(pending.vatCents, pending.currency)}</span>
         </div>
+        {verdict.deadline && (
+          <p className="verdict verdict--ok">
+            Eligible. Take the goods out of {rules.scheme === 'EU' ? 'the EU' : rules.name} by <strong>{shortDate(verdict.deadline.getTime())}</strong>
+            {companions.length ? `, together with your ${companions.length} other ${companions.length > 1 ? 'receipts' : 'receipt'} from ${shop.name} today` : ''}.
+          </p>
+        )}
+        {verdict.warnings.map((w) => (
+          <p key={w} className="field__hint">
+            {w}
+          </p>
+        ))}
         <div className="grow" />
-        <button type="button" className="btn btn--go btn--big btn--block" disabled={busy} onClick={() => join(pending.code)}>
+        <button type="button" className="btn btn--go btn--big btn--block" disabled={busy} onClick={() => join(pending.code, companions)}>
           <FaceIdIcon />
           {busy ? 'Adding it to your account…' : passkey ? `Continue with ${biometricName()}` : 'Add to my trip'}
         </button>
@@ -261,6 +367,15 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
           </div>
         ))}
         <CurrencyPicker value={t.currency} />
+        {t.profile && (
+          <p className="small muted">
+            Living in {countryName(t.profile.residenceCountry)}, leaving {shortDate(new Date(t.profile.departureDate).getTime())} from {countryName(t.profile.exit.country)}.{' '}
+            <button type="button" className="linklike" onClick={() => setEditingProfile(true)}>
+              Edit
+            </button>
+          </p>
+        )}
+        <RulesNote rules={rulesOf(first)} />
         <div className="grow" />
         <button type="button" className="btn btn--ink btn--block" onClick={() => setScreen('airport')}>
           Show my airport code
@@ -289,7 +404,11 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
         className="stack-3"
         onSubmit={(e) => {
           e.preventDefault();
-          if (typed.trim()) join(typed);
+          const code = typed.trim().toUpperCase();
+          if (!code) return;
+          // Through the same eligibility check as a scanned QR.
+          if (s.claims.some((c) => c.code === code && c.status === 'locked' && !c.travellerId)) location.hash = `#/traveller?join=${encodeURIComponent(code)}`;
+          else setError('That code does not match an open tax-free sale. Check the receipt and try again.');
         }}
       >
         <label className="field">

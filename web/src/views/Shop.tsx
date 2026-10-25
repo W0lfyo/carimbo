@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { isLive, ledger, useLedger } from '../lib/ledger';
-import { CURRENCIES, MAX_EUR_MINOR, convert, fmt, inputAmount, parseAmount, shortDate, vatFromGross, type Code } from '../lib/money';
+import { CURRENCIES, MAX_EUR_MINOR, convert, fmt, parseAmount, shortDate, vatFromGross } from '../lib/money';
 import { COUNTRIES, countryOf, detectCountry, ruleText } from '../lib/countries';
+import { CATEGORY_LABEL, checkSale, minimumText } from '../lib/eligibility';
+import { exportDeadline, type PurchaseCategory } from '../lib/taxFreeRules';
+import { RulesNote } from '../components/RulesNote';
+import { hasStablecoin } from '../lib/stellar';
 import type { Claim, ClaimStatus } from '../lib/types';
 import { QR } from '../components/QR';
 import { SHORT_WINDOW, clockTime, countdown, useNow } from '../lib/clock';
@@ -30,6 +34,7 @@ interface BasketLine {
   item: string;
   amount: string;
   rate: number;
+  category: PurchaseCategory;
 }
 
 /** The QR carries the claim itself, so a phone that never saw this till can import it and check it on Stellar. */
@@ -48,7 +53,7 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
   const cur = country.currency;
   const detected = detectCountry().code;
   const sample = (id: string) => SAMPLE[id] ?? SAMPLE['loja-azul'];
-  const [lines, setLines] = useState<BasketLine[]>(() => [{ id: 1, ...sample(initialShop), rate: country.rates[0].rate }]);
+  const [lines, setLines] = useState<BasketLine[]>(() => [{ id: 1, ...sample(initialShop), rate: country.rates[0].rate, category: 'goods' }]);
   const [shortWindow, setShortWindow] = useState(false);
   const [engine, setEngine] = useState<'native' | 'trustless'>('native');
   const canTrustless = isLive() && twEnabled();
@@ -61,18 +66,13 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
   const [locking, setLocking] = useState(false);
   const [failure, setFailure] = useState('');
 
-  // A new country brings its own standard rate, and prices are converted into its currency.
-  const prevCur = useRef<Code>(cur);
+  // A new country brings its own rates and currency: the prices are cleared, to be typed again.
+  const prevCountry = useRef(country.code);
   useEffect(() => {
-    const from = prevCur.current;
-    prevCur.current = cur;
-    setLines((ls) =>
-      ls.map((l) => {
-        const minor = parseAmount(l.amount);
-        return { ...l, rate: country.rates[0].rate, amount: minor && from !== cur ? inputAmount(convert(minor, from, cur), cur) : l.amount };
-      }),
-    );
-  }, [country.code, country.rates, cur]);
+    if (prevCountry.current === country.code) return;
+    prevCountry.current = country.code;
+    setLines((ls) => ls.map((l) => ({ ...l, rate: country.rates[0].rate, amount: '' })));
+  }, [country.code, country.rates]);
 
   const parsed = lines.map((l) => {
     const minor = parseAmount(l.amount);
@@ -82,14 +82,22 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
   const vat = parsed.reduce((n, l) => n + l.vat, 0);
   const invalid = parsed.some((l) => l.invalid);
   const incomplete = parsed.some((l) => !l.minor || !l.item.trim());
-  const tooSmall = total > 0 && total < country.minPurchase;
   const maxLocal = convert(MAX_EUR_MINOR, 'EUR', cur);
   const tooBig = total > maxLocal;
-  const minText = country.minPurchase > 0 ? `Meets the ${fmt(country.minPurchase, cur)} minimum.` : `No minimum purchase in ${country.name}.`;
-  const canLock = !invalid && !incomplete && !tooSmall && !tooBig && total > 0;
+  const rules = country.rules;
+  // The law, from taxFreeRules.ts through the eligibility engine.
+  const sale = checkSale(
+    rules,
+    { id: 'draft', shopId, shopName: shop.name, date: new Date(), lines: parsed.filter((l) => l.minor).map((l) => ({ gross: l.minor! / 100, vatRate: l.rate, category: l.category, label: l.item || undefined })) },
+    new Date(),
+  );
+  const noCoin = isLive() && !hasStablecoin(cur) ? `Carimbo has no ${cur} stablecoin on Stellar Testnet yet, so VAT in ${CURRENCIES[cur].name} cannot be escrowed here.` : '';
+  const blocked = total > 0 && !incomplete && !invalid && (!sale.ok || !!noCoin);
+  const deadline = exportDeadline(rules, new Date());
+  const canLock = !invalid && !incomplete && !tooBig && total > 0 && sale.ok && !noCoin;
 
   const update = (id: number, patch: Partial<BasketLine>) => setLines((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)));
-  const addLine = () => setLines((ls) => [...ls, { id: Math.max(...ls.map((l) => l.id)) + 1, item: '', amount: '', rate: country.rates[0].rate }]);
+  const addLine = () => setLines((ls) => [...ls, { id: Math.max(...ls.map((l) => l.id)) + 1, item: '', amount: '', rate: country.rates[0].rate, category: 'goods' }]);
   const removeLine = (id: number) => setLines((ls) => (ls.length > 1 ? ls.filter((l) => l.id !== id) : ls));
 
   const sales = s.claims.filter((c) => c.shopId === shopId);
@@ -128,7 +136,7 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
                   setShopId(x.id);
                   setCurrent(null);
                   setReclaimMsg(null);
-                  setLines([{ id: 1, ...sample(x.id), rate: countryOf(x.country).rates[0].rate }]);
+                  setLines([{ id: 1, ...sample(x.id), rate: countryOf(x.country).rates[0].rate, category: 'goods' }]);
                 }}
               >
                 {x.name}
@@ -164,6 +172,7 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
               </option>
             ))}
           </select>
+          <RulesNote rules={rules} />
         </label>
       )}
 
@@ -196,7 +205,7 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
             ledger
               .createSale(
                 shopId,
-                parsed.map((l) => ({ item: l.item.trim(), paidMinor: l.minor!, vatRate: l.rate })),
+                parsed.map((l) => ({ item: l.item.trim(), paidMinor: l.minor!, vatRate: l.rate, category: l.category })),
                 shortWindow && engine === 'native' ? DEMO_WINDOW_MS : undefined,
                 canTrustless ? engine : 'native',
               )
@@ -241,6 +250,17 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
                     </svg>
                   </button>
                 )}
+                <label className="field basket__kind">
+                  <span className="visually-hidden">What was sold</span>
+                  <select className="field__input field__input--small" value={l.category} onChange={(e) => update(l.id, { category: e.target.value as PurchaseCategory })}>
+                    {(Object.keys(CATEGORY_LABEL) as PurchaseCategory[]).map((k) => (
+                      <option key={k} value={k}>
+                        {CATEGORY_LABEL[k]}
+                        {rules.excludedCategories?.includes(k) ? ` (not refundable in ${country.name})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </li>
             ))}
           </ul>
@@ -257,15 +277,16 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
             <span>VAT set aside for the traveller</span>
             <span className="mono sale__vat">{fmt(vat, cur)}</span>
           </div>
-          <p id="sale-hint" className={`field__hint${invalid || tooSmall || tooBig ? ' field__hint--error' : ''}`}>
+          <p id="sale-hint" className={`field__hint${invalid || tooBig || blocked ? ' field__hint--error' : ''}`}>
             {invalid
               ? `Type each price in ${CURRENCIES[cur].name} as a positive number, like 400 or 400.50.`
               : tooBig
                 ? `A single receipt is capped at ${fmt(maxLocal, cur)}. Split the sale or check the price.`
-                : tooSmall
-                  ? `Tax-free in ${country.name} needs at least ${fmt(country.minPurchase, cur)} on one receipt.`
-                  : `${minText} For visitors living ${country.zone}: ${ruleText(country.exportRule)}.`}
+                : blocked
+                  ? [...sale.reasons, noCoin].filter(Boolean).join(' ')
+                  : `${minimumText(rules)} For visitors living ${country.zone}: ${ruleText(rules.exportDeadline)}${deadline ? `, so by ${shortDate(deadline.getTime())}` : ''}.`}
           </p>
+          {!invalid && !blocked && sale.warnings.length > 0 && total > 0 && <p className="field__hint">{sale.warnings.join(' ')}</p>}
           {canTrustless && (
             <div className="field">
               <span className="field__label">Escrow</span>

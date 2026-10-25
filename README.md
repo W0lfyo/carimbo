@@ -27,8 +27,8 @@ The root cause is the same everywhere. Validating the export is already electron
 
 ## What Carimbo does
 
-1. **At the till**, the shop enters the receipt: several items, each with its VAT category. The VAT is computed with the rules of the shop's country (15 countries built in) and **locked on Stellar**. The traveller scans a QR code.
-2. **On the traveller's phone**, the receipt is checked against the ledger and added to the trip. Receipts from several shops add up, and the traveller chooses the currency they want to be paid in.
+1. **At the till**, the shop enters the receipt: several items, each with its VAT category. The VAT is computed with the rules of the shop's country (22 countries built in) and **locked on Stellar**. A sale the law excludes cannot be locked, and the till says why. The traveller scans a QR code.
+2. **On the traveller's phone**, she declares only what that country's rules need (residence, dates, exit point, and age or cabin baggage where required). The eligibility engine then shows whether the receipt can be refunded, why not, and what would fix it. Eligible receipts are checked against the ledger and added to the trip. Receipts from several shops add up, and the traveller chooses the currency they want to be paid in.
 3. **At the airport**, customs opens the trip and stamps once. One atomic Stellar transaction releases every receipt, takes a 0.5% fee, **converts on the Stellar DEX** and pays the traveller.
 4. **If the traveller never leaves the country**, the shop takes its VAT back after the legal deadline. The Stellar protocol enforces this, not our app.
 
@@ -64,6 +64,19 @@ sequenceDiagram
 | Shared state across devices, no server | Traveller **data entries** (`manage_data`) and Horizon reads, polled every 4 s | `web/src/lib/sync.ts` |
 | Deadline enforced by the network | A late customs stamp fails on-chain with `op_cannot_claim`; the shop's reclaim succeeds. Shown live with the 2-minute demo window | `chainRelease`, `chainReclaim` |
 | Survive a busy public Testnet | Lookup by transaction hash and safe resubmission after a 504 | `submitClassicTx` |
+
+### Escrow by Trustless Work (HackMeridian partner)
+
+At the till, the shop can choose **Trustless Work escrow** instead of the native claimable balance ([`web/src/lib/trustless.ts`](web/src/lib/trustless.ts)). The app calls Trustless Work's REST API, which returns unsigned transactions; each actor signs its own in the browser:
+
+| Step | Trustless Work call | Signed by |
+|---|---|---|
+| Lock the VAT | `deployer/single-release`, then `fund-escrow` | the shop |
+| Customs stamp | `change-milestone-status` → `approve-milestone` → `release-funds` | customs (service provider, approver, release signer) |
+| Refusal | `dispute-escrow` → `resolve-dispute` back to the shop | customs (dispute resolver) |
+| Conversion | Stellar DEX path payment, USDC → the traveller's currency | the traveller |
+
+Their Testnet API holds Circle's **USDC**, so on this path the VAT is escrowed in USDC at the reference rate. Carimbo's 0.5% goes to the platform role; Trustless Work takes its own protocol fee. The phone follows the escrow through Trustless Work's indexer (`get-escrow-by-contract-ids`).
 
 ### Testnet deployment
 
@@ -137,6 +150,13 @@ npm run dev                 # http://localhost:5173
 
 Also try: the shop switcher (several shops, one trip), several items per receipt, the country menu (VAT rates, minimums and export windows of 15 countries), and an unknown code at the customs desk.
 
+## Tax-free rules and eligibility
+
+- [`web/src/lib/taxFreeRules.ts`](web/src/lib/taxFreeRules.ts) is the only place with legal figures: VAT rates, minimum (VAT included or excluded, and how receipts add up), export window, who is eligible (residence zone, minimum age, maximum stay), refund model, national validation system, exclusions and sources. Countries whose figures come from a single secondary source carry `verified: false`, and the interface shows *Rules to be confirmed*.
+- [`web/src/lib/eligibility.ts`](web/src/lib/eligibility.ts) is a pure engine: `checkEligibility(rules, traveller, purchases, today)` returns `{ eligible, reasons, deadline, warnings, fixes }`. It checks residence outside the zone (EU = the 27 member states), age, length of stay, the minimum with each aggregation (per receipt, same shop same day, up to N receipts, same business within N days), the departure against the export deadline, `scheme: "none"` (United Kingdom) and excluded categories.
+- **27 unit tests** (`npm test`), including: Portugal €55 VAT included refused and €62 accepted (the minimum is €50 *VAT excluded*), a French resident in France refused, Japan with a departure 95 days after purchase refused, and a 15-year-old in Singapore refused.
+- Every screen links to the rules' sources. Information only, not legal or tax advice.
+
 ## Passkey
 
 Before the traveller's account signs anything, the phone asks for **Face ID, Touch ID, Windows Hello or a fingerprint** through WebAuthn ([`web/src/lib/passkey.ts`](web/src/lib/passkey.ts)). The first scan creates a passkey on the device (ES256, the P-256 curve); the next ones must confirm it. On a device without a platform authenticator, the flow continues without it.
@@ -160,7 +180,6 @@ contracts/escrow/          Soroban version of the escrow + tests
 
 - **Wallets:** a passkey smart account for the traveller (OpenZeppelin smart accounts) and fee sponsorship, so travellers never hold XLM.
 - **Cash-out:** a SEP-10 + SEP-24 anchor (MoneyGram Access, for example) behind *Send to my bank card*, for bank or cash withdrawal in 170+ countries. Today the button explains the step; the payout stops at the traveller's Stellar account.
-- **Escrow as a service:** run the claim on Trustless Work's single-release escrow (customs as approver and release signer, the shop as dispute resolver after the deadline), alongside the native claimable-balance version.
 - **Identity:** proof of non-EU residence from the passport chip, in zero knowledge, without storing passport data (Human ID / Stellar Passport).
 - **Float yield:** VAT waits up to 3 months in escrow. Placing it in a yield vault (DeFindex) can fund the fee, so the traveller gets 100%.
 - **Distribution:** start with partner shops in one district of Lisbon, then offer Carimbo to tax authorities as the payment layer of their existing electronic export validation.
