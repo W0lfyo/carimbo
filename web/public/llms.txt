@@ -27,3 +27,4 @@ Carimbo is a single-page web app (React + TypeScript) running on Stellar Testnet
 ## Source
 
 - [Code and README](https://github.com/W0lfyo/carimbo): architecture, Testnet accounts and transactions as evidence.
+- [Demo video](https://youtu.be/R3esjXFGgm0): the full flow in 2 minutes.

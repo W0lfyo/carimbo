@@ -5,8 +5,14 @@
 *Carimbo* is Portuguese for *stamp*. In Carimbo, the customs stamp is the payment.
 
 - **Live app:** https://carimbo-six.vercel.app (Stellar Testnet)
+- **Demo video (2 min):** https://youtu.be/R3esjXFGgm0
 - **Track:** HackMeridian 2026 · Genesis · Stellar Unlocked
+- **Team:** Ferdinand Robichon, Nicolas Felemez
 - **Built during the event** (25–26 October 2026, Lisbon). No prior work.
+
+[![Carimbo demo video](https://img.youtube.com/vi/R3esjXFGgm0/maxresdefault.jpg)](https://youtu.be/R3esjXFGgm0)
+
+![The shop locks the VAT, the traveller adds it with Face ID, customs stamps once, the traveller is paid in dollars](docs/screens.jpg)
 
 ---
 
@@ -196,3 +202,7 @@ contracts/escrow/          Soroban version of the escrow + tests
 - [Japan's tax-free reform, November 2026](https://www.gltjp.com/en/article/item/21542/) · [Japan considers stablecoin refunds](https://www.digitaltoday.co.kr/en/view/117802/japan-considers-using-stablecoins-for-consumption-tax-refunds-to-foreign-tourists)
 - [Australia's Tourist Refund Scheme](https://executivetraveller.com/australian-trs-gst-refund-guide) · [UAE VAT refunds](https://www.propertyfinder.ae/blog/vat-refund-dubai/)
 - [Global Blue business update](https://www.businesswire.com/news/home/20250207266485/en)
+
+## License
+
+[MIT](LICENSE) © 2026 Ferdinand Robichon, Nicolas Felemez
