@@ -22,7 +22,7 @@ Carimbo is a single-page web app (React + TypeScript) running on Stellar Testnet
 
 ## Tax-free rules
 
-22 countries' rules (VAT rates, minimum VAT included or excluded and how receipts add up, export window, residence zone, minimum age, maximum stay, refund model, exclusions, sources) and a pure eligibility engine with 27 unit tests. Information only, not legal or tax advice.
+22 countries' rules (VAT rates, minimum VAT included or excluded and how receipts add up, export window, residence zone, minimum age, maximum stay, refund model, exclusions, sources) and a pure eligibility engine with 30 unit tests. Information only, not legal or tax advice.
 
 ## Source
 

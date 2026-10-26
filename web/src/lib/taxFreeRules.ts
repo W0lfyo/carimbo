@@ -38,7 +38,9 @@ export interface TaxFreeRules {
   };
   refundModel: RefundModel | null;
   digitalValidation?: string; // national electronic export validation
-  excluded?: string[]; // conditions and exclusions, shown to people
+  taxName?: string; // what the tax is called: "VAT" by default, "GST", "consumption tax"
+  excluded?: string[]; // what cannot be refunded, in words
+  conditions?: string[]; // conditions to respect at departure, shown as warnings
   excludedCategories?: PurchaseCategory[]; // what cannot be refunded, checked by the engine
   requirements?: { carryInCabin?: boolean }; // e.g. Australia: goods in cabin baggage or worn
   verified: boolean;
@@ -46,8 +48,10 @@ export interface TaxFreeRules {
 }
 
 const EU_DEADLINE: ExportDeadline = { kind: "endOfNthMonthAfterPurchase", months: 3 };
-const EU_EXCLUDED = ["Services", "Hotels and restaurants", "Goods for business use"];
-const EU_EXCLUDED_CATEGORIES: PurchaseCategory[] = ["services", "hospitality", "business"];
+const EU_EXCLUDED = ["Services", "Hotels and restaurants", "Goods for business use", "Second-hand goods sold under the margin scheme", "Cosmetic treatments"];
+const EU_EXCLUDED_CATEGORIES: PurchaseCategory[] = ["services", "hospitality", "business", "secondhand", "cosmetic-procedures"];
+// Tourist refund schemes cover goods taken out of the country, never services consumed there.
+const SERVICES: PurchaseCategory[] = ["services", "hospitality", "cosmetic-procedures", "business"];
 
 export const TAX_FREE_RULES: Record<string, TaxFreeRules> = {
   PT: {
@@ -167,7 +171,7 @@ export const TAX_FREE_RULES: Record<string, TaxFreeRules> = {
     minimum: { amount: 300, basis: "gross", aggregation: { kind: "perShopPerDay" } },
     exportDeadline: { kind: "days", days: 30 },
     eligibility: { residentOutside: "CH" },
-    refundModel: "validateAtExitThenRefund", verified: false,
+    refundModel: "validateAtExitThenRefund", excludedCategories: SERVICES, verified: false,
     sources: ["https://www.withprive.com/en/blog/vat-refund-rates-by-country"],
   },
   NO: {
@@ -176,7 +180,7 @@ export const TAX_FREE_RULES: Record<string, TaxFreeRules> = {
     minimum: { amount: 315, basis: "gross", aggregation: { kind: "perInvoice" } },
     exportDeadline: { kind: "months", months: 1 },
     eligibility: { residentOutside: "NO" },
-    refundModel: "validateAtExitThenRefund", verified: false,
+    refundModel: "validateAtExitThenRefund", excludedCategories: SERVICES, verified: false,
     sources: ["https://en.wikipedia.org/wiki/Tax-free_shopping"],
   },
   GB: {
@@ -197,7 +201,8 @@ export const TAX_FREE_RULES: Record<string, TaxFreeRules> = {
     eligibility: { residentOutside: "JP" },
     refundModel: "refundAfterDeparture", // new model from 1 Nov 2026; before: exempt at the till
     digitalValidation: "Customs kiosks / Visit Japan Web",
-    excluded: ["If one item of a receipt is missing at departure, the whole receipt is refused"],
+    conditions: ["If one item of a receipt is missing at departure, the whole receipt is refused"],
+    excludedCategories: SERVICES, taxName: "consumption tax",
     verified: true,
     sources: ["https://www.japan-guide.com/news/tax-free-shopping.html"],
   },
@@ -210,7 +215,7 @@ export const TAX_FREE_RULES: Record<string, TaxFreeRules> = {
     eligibility: { residentOutside: "KR", maxStayMonths: 6 },
     refundModel: "instantAtStoreWithCheck",
     excluded: ["Tobacco", "Second-hand goods", "Cosmetic surgery and treatments (since 01/2026)"],
-    excludedCategories: ["tobacco", "secondhand", "cosmetic-procedures"],
+    excludedCategories: ["tobacco", "secondhand", "cosmetic-procedures", "services", "hospitality", "business"],
     verified: false,
     sources: ["https://www.trip.com/guide/info/korea-tax-refund.html"],
   },
@@ -221,7 +226,7 @@ export const TAX_FREE_RULES: Record<string, TaxFreeRules> = {
     exportDeadline: { kind: "months", months: 2 }, // to check
     eligibility: { residentOutside: "SG", minAge: 16 },
     refundModel: "validateAtExitThenRefund", digitalValidation: "eTRS (kiosks at Changi)",
-    verified: true,
+    excludedCategories: SERVICES, taxName: "GST", verified: true,
     sources: ["https://www.customs.gov.sg/at-customs/departing-singapore/tourist-refund-scheme/"],
   },
   TH: {
@@ -231,7 +236,8 @@ export const TAX_FREE_RULES: Record<string, TaxFreeRules> = {
     exportDeadline: { kind: "days", days: 60 },
     eligibility: { residentOutside: "TH" },
     refundModel: "validateAtExitThenRefund",
-    excluded: ["Jewellery, gold, watches, glasses and pens: extra check after immigration"],
+    conditions: ["Jewellery, gold, watches, glasses and pens: extra check after immigration"],
+    excludedCategories: SERVICES,
     verified: true,
     sources: ["https://vrtmap.rd.go.th/gps/en/Conditions.aspx"],
   },
@@ -242,7 +248,8 @@ export const TAX_FREE_RULES: Record<string, TaxFreeRules> = {
     exportDeadline: { kind: "days", days: 60 },
     eligibility: { residentOutside: "AU" },
     refundModel: "validateAtExitThenRefund",
-    excluded: ["Goods must be in cabin baggage or worn"],
+    conditions: ["Goods must be in cabin baggage or worn"],
+    excludedCategories: SERVICES, taxName: "GST",
     requirements: { carryInCabin: true },
     verified: true,
     sources: ["https://en.wikipedia.org/wiki/Tax-free_shopping"],
@@ -253,7 +260,7 @@ export const TAX_FREE_RULES: Record<string, TaxFreeRules> = {
     minimum: { amount: 1000, basis: "net", aggregation: { kind: "perInvoice" } }, // often raised with inflation
     exportDeadline: { kind: "months", months: 3 },
     eligibility: { residentOutside: "TR" },
-    refundModel: "validateAtExitThenRefund", verified: false,
+    refundModel: "validateAtExitThenRefund", excludedCategories: SERVICES, verified: false,
     sources: ["https://www.wise.com/gb/blog/vat-refund-turkey"],
   },
 };

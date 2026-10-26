@@ -47,7 +47,7 @@ const cents = (n: number) => Math.round(n * 100) / 100;
 
 export function money(amount: number, currency: string): string {
   try {
-    return new Intl.NumberFormat('en-GB', { style: 'currency', currency, maximumFractionDigits: currency === 'JPY' || currency === 'KRW' ? 0 : 2 }).format(amount);
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency, currencyDisplay: 'narrowSymbol', maximumFractionDigits: currency === 'JPY' || currency === 'KRW' ? 0 : 2 }).format(amount);
   } catch {
     return `${amount.toFixed(2)} ${currency}`;
   }
@@ -83,7 +83,7 @@ function grossFor(rules: TaxFreeRules, missingBase: number, rate: number): numbe
   return cents(rules.minimum?.basis === 'net' ? missingBase * (1 + rate / 100) : missingBase);
 }
 
-const basisText = (rules: TaxFreeRules) => (rules.minimum?.basis === 'net' ? 'VAT excluded' : 'VAT included');
+const basisText = (rules: TaxFreeRules) => `${rules.taxName ?? 'VAT'} ${rules.minimum?.basis === 'net' ? 'excluded' : 'included'}`;
 
 /** What the traveller must declare for this country: the optional fields only appear when the rules need them. */
 export function requiredFields(rules: TaxFreeRules) {
@@ -112,6 +112,7 @@ export function checkTraveller(rules: TaxFreeRules, t: TravellerProfile, today: 
   if (!arrival || !departure) reasons.push('Enter your arrival and departure dates.');
   else {
     if (departure.getTime() < arrival.getTime()) reasons.push('Your departure date is before your arrival date.');
+    if (arrival.getTime() > new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) reasons.push('Your arrival date is in the future: enter the day you actually arrived.');
     if (departure.getTime() < new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) reasons.push('Your departure date is in the past.');
     const maxStay = rules.eligibility.maxStayMonths;
     if (maxStay) {
@@ -204,8 +205,8 @@ function meetsMinimumLine(rules: TaxFreeRules, l: PurchaseLine): boolean {
 /** One purchase, in the context of the traveller's other purchases. `t` null = the till, before anyone is known. */
 export function checkPurchase(rules: TaxFreeRules, t: TravellerProfile | null, p: Purchase, all: Purchase[], today: Date): EligibilityResult {
   const reasons: string[] = [];
-  // Exclusions the engine checks by category are reasons, not warnings; the others are conditions to tell people.
-  const warnings: string[] = rules.excludedCategories?.length ? [] : [...(rules.excluded ?? [])];
+  // Exclusions are checked by category (reasons); conditions to respect at departure are warnings.
+  const warnings: string[] = [...(rules.conditions ?? [])];
   const fixes: string[] = [];
 
   if (rules.scheme === 'none' || !rules.refundModel) {
@@ -221,7 +222,7 @@ export function checkPurchase(rules: TaxFreeRules, t: TravellerProfile | null, p
   // Exclusions: services, restaurants, tobacco… cannot be refunded.
   const excluded = p.lines.filter((l) => rules.excludedCategories?.includes(l.category ?? 'goods'));
   if (excluded.length) {
-    reasons.push(`${excluded.map((l) => l.label ?? CATEGORY_LABEL[l.category ?? 'goods']).join(', ')}: ${excluded.length > 1 ? 'these cannot' : 'this cannot'} be refunded in ${rules.name}.`);
+    reasons.push(`${excluded.map((l) => (l.label ? `${l.label} (${CATEGORY_LABEL[l.category ?? 'goods'].toLowerCase()})` : CATEGORY_LABEL[l.category ?? 'goods'])).join(', ')}: ${excluded.length > 1 ? 'these cannot' : 'this cannot'} be refunded in ${rules.name}.`);
     if (excluded.length < p.lines.length) fixes.push('Ask the shop for a separate receipt with the goods only.');
   }
 
@@ -243,6 +244,10 @@ export function checkPurchase(rules: TaxFreeRules, t: TravellerProfile | null, p
     const who = checkTraveller(rules, t, today);
     reasons.push(...who.reasons);
     fixes.push(...who.fixes);
+    const arrival = parseDay(t.arrivalDate);
+    const bought = new Date(p.date.getFullYear(), p.date.getMonth(), p.date.getDate());
+    if (arrival && bought.getTime() < arrival.getTime())
+      reasons.push(`This receipt is dated ${dateText(p.date)}, before your arrival on ${dateText(arrival)}: only goods bought during your stay qualify.`);
     if (deadline && departure && departure.getTime() > deadline.getTime())
       reasons.push(`You leave on ${dateText(departure)}, after the export deadline of ${dateText(deadline)}. The goods must leave ${rules.scheme === 'EU' ? 'the EU' : rules.name} by then.`);
     if (rules.scheme === 'EU' && t.exit.country && t.exit.country !== rules.country && EU27.includes(t.exit.country))
@@ -330,3 +335,6 @@ export function processSteps(rules: TaxFreeRules): string[] {
       return [`No tax-free refund in ${rules.name}.`];
   }
 }
+
+/** What the tax is called in this country, for labels: "VAT", "GST", "consumption tax". */
+export const taxName = (rules: TaxFreeRules) => rules.taxName ?? 'VAT';

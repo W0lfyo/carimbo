@@ -165,7 +165,7 @@ Also try: the shop switcher (several shops, one trip), several items per receipt
 
 - [`web/src/lib/taxFreeRules.ts`](web/src/lib/taxFreeRules.ts) is the only place with legal figures: VAT rates, minimum (VAT included or excluded, and how receipts add up), export window, who is eligible (residence zone, minimum age, maximum stay), refund model, national validation system, exclusions and sources. Countries whose figures come from a single secondary source carry `verified: false`, and the interface shows *Rules to be confirmed*.
 - [`web/src/lib/eligibility.ts`](web/src/lib/eligibility.ts) is a pure engine: `checkEligibility(rules, traveller, purchases, today)` returns `{ eligible, reasons, deadline, warnings, fixes }`. It checks residence outside the zone (EU = the 27 member states), age, length of stay, the minimum with each aggregation (per receipt, same shop same day, up to N receipts, same business within N days), the departure against the export deadline, `scheme: "none"` (United Kingdom) and excluded categories.
-- **27 unit tests** (`npm test`), including: Portugal €55 VAT included refused and €62 accepted (the minimum is €50 *VAT excluded*), a French resident in France refused, Japan with a departure 95 days after purchase refused, and a 15-year-old in Singapore refused.
+- **30 unit tests** (`npm test`), including: Portugal €55 VAT included refused and €62 accepted (the minimum is €50 *VAT excluded*), a French resident in France refused, Japan with a departure 95 days after purchase refused, and a 15-year-old in Singapore refused.
 - Every screen links to the rules' sources. Information only, not legal or tax advice.
 
 ## Passkey

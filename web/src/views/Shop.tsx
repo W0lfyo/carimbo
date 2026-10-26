@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { isLive, ledger, useLedger } from '../lib/ledger';
 import { CURRENCIES, MAX_EUR_MINOR, convert, fmt, parseAmount, shortDate, vatFromGross } from '../lib/money';
 import { COUNTRIES, countryOf, detectCountry, ruleText } from '../lib/countries';
-import { CATEGORY_LABEL, checkSale, minimumText } from '../lib/eligibility';
+import { CATEGORY_LABEL, checkSale, minimumText, taxName } from '../lib/eligibility';
 import { exportDeadline, type PurchaseCategory } from '../lib/taxFreeRules';
 import { RulesNote } from '../components/RulesNote';
 import { hasStablecoin } from '../lib/stellar';
@@ -94,7 +94,10 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
   const noCoin = isLive() && !hasStablecoin(cur) ? `Carimbo has no ${cur} stablecoin on Stellar Testnet yet, so VAT in ${CURRENCIES[cur].name} cannot be escrowed here.` : '';
   const blocked = total > 0 && !incomplete && !invalid && (!sale.ok || !!noCoin);
   const deadline = exportDeadline(rules, new Date());
-  const canLock = !invalid && !incomplete && !tooBig && total > 0 && sale.ok && !noCoin;
+  const [passportOk, setPassportOk] = useState(false);
+  const tax = taxName(rules);
+  const Tax = tax === 'VAT' || tax === 'GST' ? tax : tax[0].toUpperCase() + tax.slice(1);
+  const canLock = !invalid && !incomplete && !tooBig && total > 0 && sale.ok && !noCoin && passportOk;
 
   const update = (id: number, patch: Partial<BasketLine>) => setLines((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)));
   const addLine = () => setLines((ls) => [...ls, { id: Math.max(...ls.map((l) => l.id)) + 1, item: '', amount: '', rate: country.rates[0].rate, category: 'goods' }]);
@@ -163,7 +166,7 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
 
       {!compact && (
         <label className="field country">
-          <span className="field__label">Shop location sets the VAT rates, minimum and export window</span>
+          <span className="field__label">Demo: apply another country’s tax-free rules to this till</span>
           <select className="field__input" value={shop.country} onChange={(e) => ledger.setShopCountry(shopId, e.target.value)}>
             {COUNTRIES.map((c) => (
               <option key={c.code} value={c.code}>
@@ -172,6 +175,7 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
               </option>
             ))}
           </select>
+          <span className="field__hint">The demo shops are in Lisbon. Switching the country changes the rates, minimum, currency and export window, to show how Carimbo adapts.</span>
           <RulesNote rules={rules} />
         </label>
       )}
@@ -184,15 +188,21 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
               {(live.lines ?? [{ item: live.item, paidMinor: live.paidCents, vatRate: live.vatRate, vatMinor: live.vatCents }]).map((l, i) => (
                 <li key={i}>
                   <span>{l.item}</span>
-                  <span className="muted small">VAT {l.vatRate}%</span>
+                  <span className="muted small">{Tax} {l.vatRate}%</span>
                   <span className="mono">{fmt(l.paidMinor, live.currency)}</span>
                 </li>
               ))}
             </ul>
             <div className="sale__total">
-              <span>VAT set aside for the traveller</span>
+              <span>{Tax} set aside for the traveller</span>
               <span className="mono sale__vat">{fmt(live.vatCents, live.currency)}</span>
             </div>
+          </section>
+        ) : rules.scheme === 'none' ? (
+          <section className="card sale stack-3" aria-live="polite">
+            <h2 className="subtitle">No tax-free sales in {country.name}</h2>
+            <p className="muted">{sale.reasons[0] ?? `${country.name} has no tax-free scheme for visitors.`}</p>
+            <RulesNote rules={rules} />
           </section>
         ) : (
         <form
@@ -209,7 +219,10 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
                 shortWindow && engine === 'native' ? DEMO_WINDOW_MS : undefined,
                 canTrustless ? engine : 'native',
               )
-              .then(setCurrent)
+              .then((c) => {
+                setCurrent(c);
+                setPassportOk(false);
+              })
               .catch((err: Error) => setFailure(`The escrow did not accept the sale: ${err.message}`))
               .finally(() => setLocking(false));
           }}
@@ -274,8 +287,8 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
             <span className="mono">{fmt(total, cur)}</span>
           </div>
           <div className="sale__total">
-            <span>VAT set aside for the traveller</span>
-            <span className="mono sale__vat">{fmt(vat, cur)}</span>
+            <span>{Tax} set aside for the traveller</span>
+            <span className="mono sale__vat">{tooBig || invalid ? '—' : fmt(vat, cur)}</span>
           </div>
           <p id="sale-hint" className={`field__hint${invalid || tooBig || blocked ? ' field__hint--error' : ''}`}>
             {invalid
@@ -314,8 +327,15 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
             </span>
           </label>
           )}
+          <label className="check">
+            <input type="checkbox" checked={passportOk} onChange={(e) => setPassportOk(e.target.checked)} />
+            <span>
+              <strong>Passport checked</strong>
+              <span className="muted small">The customer showed a passport and lives {country.zone}. Customs checks it again at departure.</span>
+            </span>
+          </label>
           <button type="submit" className="btn btn--go btn--block btn--big" disabled={!canLock || locking}>
-            {locking ? (engine === 'trustless' && canTrustless ? 'Opening the Trustless Work escrow…' : 'Locking VAT on Stellar…') : 'Lock VAT and show QR'}
+            {locking ? (engine === 'trustless' && canTrustless ? 'Opening the Trustless Work escrow…' : `Locking ${tax} on Stellar…`) : passportOk || !total ? `Lock ${tax} and show QR` : 'Check the passport first'}
           </button>
           {failure && <p className="field__hint field__hint--error">{failure}</p>}
         </form>

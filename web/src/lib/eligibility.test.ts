@@ -156,6 +156,20 @@ describe('export deadline', () => {
   });
 });
 
+describe('dates of the stay', () => {
+  it('refuses a purchase made before the declared arrival', () => {
+    const t = visitor({ arrivalDate: iso(day(3)), departureDate: iso(day(6)) });
+    const r = checkEligibility(PT, t, [buy(100)], TODAY);
+    expect(r.eligible).toBe(false);
+    expect(r.reasons.join(' ')).toMatch(/future|before your arrival/);
+  });
+  it('refuses a purchase dated before arrival even with a past arrival', () => {
+    const t = visitor({ arrivalDate: iso(day(-1)) });
+    const r = checkEligibility(PT, t, [buy(100, { date: day(-3) })], TODAY);
+    expect(r.reasons.join(' ')).toMatch(/before your arrival/);
+  });
+});
+
 describe('scheme "none"', () => {
   it('the United Kingdom is never eligible, with an explanation', () => {
     const r = checkEligibility(TAX_FREE_RULES.GB, visitor({ exit: { kind: 'airport', country: 'GB' } }), [buy(500, { rate: 20 })], TODAY);
@@ -175,6 +189,10 @@ describe('exclusions and declarations', () => {
   it('tobacco cannot be refunded in Korea', () => {
     const p = buy(0, { lines: [{ gross: 50_000, vatRate: 10, category: 'tobacco' }] });
     expect(checkEligibility(TAX_FREE_RULES.KR, visitor({ exit: { kind: 'airport', country: 'KR' } }), [p], TODAY).eligible).toBe(false);
+  });
+  it('services are refused outside the EU too (Japan)', () => {
+    const p = buy(0, { lines: [{ gross: 20_000, vatRate: 10, category: 'services' }] });
+    expect(checkEligibility(JP, visitor({ exit: { kind: 'airport', country: 'JP' } }), [p], TODAY).eligible).toBe(false);
   });
   it('business use is refused', () => {
     expect(checkEligibility(PT, visitor({ personalUse: false }), [buy(100)], TODAY).eligible).toBe(false);

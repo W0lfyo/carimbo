@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ledger, useLedger } from '../lib/ledger';
-import { CURRENCIES, PAYOUT_CURRENCIES, convert, fmt, fmtBare, fmtPlain, shortDate } from '../lib/money';
+import { CURRENCIES, PAYOUT_CURRENCIES, convert, feeOf, fmt, fmtBare, fmtPlain, shortDate } from '../lib/money';
 import { countryOf } from '../lib/countries';
 import { txUrl } from '../lib/stellar';
 import type { CurrencyCode } from '../lib/types';
@@ -11,7 +11,7 @@ import { QR } from '../components/QR';
 import { Stamp } from '../components/Stamp';
 import { SplitFlap } from '../components/SplitFlap';
 import { biometricName, hasPasskeyDevice, passkeyReady, verifyTraveller } from '../lib/passkey';
-import { checkPurchase, type Purchase } from '../lib/eligibility';
+import { checkPurchase, taxName, type Purchase } from '../lib/eligibility';
 import { countryName } from '../lib/countries';
 import { ProfileForm } from '../components/ProfileForm';
 import { RulesNote } from '../components/RulesNote';
@@ -164,7 +164,7 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
             <LogoMark />
             <span>Carimbo</span>
           </div>
-          <h1 className="headline">This receipt can’t be refunded yet.</h1>
+          <h1 className="headline">{verdict.fixes.length ? 'This receipt can’t be refunded yet.' : 'This receipt can’t be refunded.'}</h1>
           <div className="receipt">
             <div className="receipt__row">
               <strong>{shop.name}</strong>
@@ -224,8 +224,11 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
             <span className="mono">{fmtPlain(pending.paidCents, pending.currency)}</span>
           </div>
           <div className="receipt__tear" aria-hidden="true" />
-          <span className="muted">VAT you get back</span>
-          <span className="mono receipt__big">{fmt(pending.vatCents, pending.currency)}</span>
+          <span className="muted">You get back</span>
+          <span className="mono receipt__big">{fmt(pending.vatCents - feeOf(pending.vatCents), pending.currency)}</span>
+          <span className="muted small">
+            {fmt(pending.vatCents, pending.currency)} of {taxName(rules)} minus Carimbo’s 0.5% fee, before conversion
+          </span>
         </div>
         {verdict.deadline && (
           <p className="verdict verdict--ok">

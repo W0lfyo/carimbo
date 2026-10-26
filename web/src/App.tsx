@@ -79,7 +79,9 @@ export function App() {
           </div>
         </main>
       )}
-      <footer className="legal-footer">Information only, not legal or tax advice.</footer>
+      <footer className="legal-footer">
+        Information only, not legal or tax advice. Demo on Stellar Testnet: the demo accounts’ keys are public on purpose and hold worthless test money.
+      </footer>
     </div>
   );
 }

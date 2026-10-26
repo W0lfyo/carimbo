@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { TaxFreeRules } from '../lib/taxFreeRules';
 import { EU27, RESIDENCE_CODES, countryName, countryOf } from '../lib/countries';
-import { requiredFields, type TravellerProfile } from '../lib/eligibility';
+import { inZone, requiredFields, type TravellerProfile } from '../lib/eligibility';
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const shift = (days: number) => {
@@ -19,8 +19,12 @@ export function ProfileForm({ rules, initial, onSave, onCancel }: { rules: TaxFr
   const eu = rules.eligibility.residentOutside === 'EU';
   const exitChoices = eu ? [...EU27].sort((a, b) => countryName(a).localeCompare(countryName(b))) : [rules.country];
   const [step, setStep] = useState<1 | 2>(1);
-  const [p, setP] = useState<TravellerProfile>(
-    initial ?? {
+  const [query, setQuery] = useState('');
+  const [p, setP] = useState<TravellerProfile>(() =>
+    initial
+      ? // The exit point starts at the country of this purchase; she can change it.
+        { ...initial, exit: { kind: initial.exit.kind, country: rules.country, point: countryOf(rules.country).airport } }
+      : {
       residenceCountry: '',
       arrivalDate: shift(-3),
       departureDate: shift(2),
@@ -28,9 +32,12 @@ export function ProfileForm({ rules, initial, onSave, onCancel }: { rules: TaxFr
       personalUse: true,
     },
   );
+  const insider = !!p.residenceCountry && inZone(p.residenceCountry, rules.eligibility.residentOutside);
+  const q = query.trim().toLowerCase();
+  const choices = q ? RESIDENCE_CODES.filter((c) => countryName(c).toLowerCase().includes(q) || c.toLowerCase() === q) : RESIDENCE_CODES;
   const set = (patch: Partial<TravellerProfile>) => setP((x) => ({ ...x, ...patch }));
   const ageOk = !need.age || p.ageAtLeast !== undefined;
-  const step1Ok = !!p.residenceCountry && !!p.arrivalDate && !!p.departureDate && ageOk;
+  const step1Ok = !!p.residenceCountry && !insider && !!p.arrivalDate && !!p.departureDate && ageOk;
 
   return (
     <form
@@ -46,15 +53,23 @@ export function ProfileForm({ rules, initial, onSave, onCancel }: { rules: TaxFr
         <>
           <label className="field">
             <span className="field__label">Country where you usually live</span>
+            <input className="field__input field__input--small" type="search" placeholder="Search a country" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search a country" />
             <select className="field__input" required value={p.residenceCountry} onChange={(e) => set({ residenceCountry: e.target.value })}>
-              <option value="">Choose a country</option>
-              {RESIDENCE_CODES.map((c) => (
+              <option value="">{choices.length ? 'Choose a country' : 'No country matches'}</option>
+              {p.residenceCountry && !choices.includes(p.residenceCountry) && <option value={p.residenceCountry}>{countryName(p.residenceCountry)}</option>}
+              {choices.map((c) => (
                 <option key={c} value={c}>
                   {countryName(c)}
                 </option>
               ))}
             </select>
-            <span className="field__hint">Your home address counts, not your nationality: tax-free is for people who live outside {eu ? 'the EU' : rules.name}.</span>
+            {insider ? (
+              <span className="field__hint field__hint--error" role="alert">
+                You live in {eu ? 'the EU' : rules.name}: tax-free shopping here is only for visitors whose home is outside {eu ? 'the EU' : rules.name}. Nationality does not change this.
+              </span>
+            ) : (
+              <span className="field__hint">Your home address counts, not your nationality: tax-free is for people who live outside {eu ? 'the EU' : rules.name}.</span>
+            )}
           </label>
           <div className="profile__row">
             <label className="field">
