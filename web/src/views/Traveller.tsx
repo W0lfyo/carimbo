@@ -238,6 +238,12 @@ export function Traveller({ joinCode, joinQuery }: { joinCode?: string; joinQuer
             {w}
           </p>
         ))}
+        <p className="small muted">
+          Checked for a resident of {countryName(t.profile!.residenceCountry)} leaving {shortDate(new Date(t.profile!.departureDate).getTime())}.{' '}
+          <button type="button" className="linklike" onClick={() => setEditingProfile(true)}>
+            Edit my details
+          </button>
+        </p>
         <div className="grow" />
         <button type="button" className="btn btn--go btn--big btn--block" disabled={busy} onClick={() => join(pending.code, companions)}>
           <FaceIdIcon />
