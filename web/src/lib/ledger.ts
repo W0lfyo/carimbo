@@ -3,6 +3,7 @@ import type { Activity, ActivityKind, Claim, CurrencyCode, LedgerState } from '.
 import { convert, feeOf, fmt, rateBetween, vatFromGross } from './money';
 import { balances, chainAttach, chainOpen, chainReclaim, chainRelease, chainReject, chainSetCurrency, claimableInfo, getConfig, type Role } from './stellar';
 import { countryOf } from './countries';
+import { SHOP_CATALOG, roleOf } from './shops';
 import { exportDeadline } from './taxFreeRules';
 import type { TravellerProfile } from './eligibility';
 import type { PurchaseCategory } from './taxFreeRules';
@@ -41,13 +42,7 @@ function seed(): LedgerState {
   const june = new Date(new Date(now).getFullYear(), 5, 2, 11, 20).getTime();
   const c1Created = now - 7 * DAY;
   return {
-    shops: [
-      { id: 'loja-azul', name: 'Loja Azul', area: 'Chiado, Lisbon', domain: 'lojaazul.pt', country: 'PT' },
-      { id: 'casa-verde', name: 'Casa Verde', area: 'Príncipe Real, Lisbon', domain: 'casaverde.pt', country: 'PT' },
-      { id: 'fio-de-alfama', name: 'Fio de Alfama', area: 'Alfama, Lisbon', domain: 'fiodealfama.pt', country: 'PT' },
-      { id: 'ourivesaria-lume', name: 'Ourivesaria Lume', area: 'Baixa, Lisbon', domain: 'ourivesarialume.pt', country: 'PT' },
-      { id: 'sapataria-gaivota', name: 'Sapataria Gaivota', area: 'Campo de Ourique, Lisbon', domain: 'sapatariagaivota.pt', country: 'PT' },
-    ],
+    shops: SHOP_CATALOG.map(({ role: _r, sample: _s, ...shop }) => shop),
     traveller: {
       id: 'maya',
       name: 'Maya Chen',
@@ -98,10 +93,10 @@ function load(): LedgerState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      // Shops added in a later version join an existing local ledger.
+      // The shop catalog always comes from the code: new shops appear, and a demo shop keeps its own country.
       const saved = JSON.parse(raw) as LedgerState;
-      const missing = seed().shops.filter((x) => !saved.shops.some((y) => y.id === x.id));
-      return missing.length ? { ...saved, shops: [...saved.shops, ...missing] } : saved;
+      const catalog = seed().shops;
+      return { ...saved, shops: [...catalog, ...saved.shops.filter((x) => !catalog.some((y) => y.id === x.id))] };
     }
   } catch {
     /* storage unavailable: start fresh */
@@ -142,13 +137,7 @@ function activity(kind: ActivityKind, label: string, amount: string, tx?: string
   return { id: hex(6), at: Date.now(), kind, label, amount, tx: tx || hex(), live: !!tx && !onChainNoHash };
 }
 
-const SHOP_ROLE: Record<string, Role> = {
-  'loja-azul': 'lojaAzul',
-  'casa-verde': 'casaVerde',
-  'fio-de-alfama': 'fioAlfama',
-  'ourivesaria-lume': 'lume',
-  'sapataria-gaivota': 'gaivota',
-};
+const SHOP_ROLE = new Proxy({} as Record<string, Role>, { get: (_t, id: string) => roleOf(id) });
 const live = () => getConfig() !== null;
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

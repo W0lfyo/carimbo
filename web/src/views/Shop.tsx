@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { isLive, ledger, useLedger } from '../lib/ledger';
 import { CURRENCIES, MAX_EUR_MINOR, convert, fmt, parseAmount, shortDate, vatFromGross } from '../lib/money';
 import { COUNTRIES, countryOf, detectCountry, ruleText } from '../lib/countries';
@@ -11,15 +11,8 @@ import { QR } from '../components/QR';
 import { SHORT_WINDOW, clockTime, countdown, useNow } from '../lib/clock';
 import { txUrl } from '../lib/stellar';
 import { twEnabled } from '../lib/trustless';
+import { catalogShop, shopsOf } from '../lib/shops';
 
-/** What each demo shop typically sells, to prefill the first line of the till. */
-const SAMPLE: Record<string, { item: string; amount: string }> = {
-  'loja-azul': { item: 'Leather bag', amount: '400.00' },
-  'casa-verde': { item: 'Ceramics set', amount: '200.00' },
-  'fio-de-alfama': { item: 'Linen tablecloth', amount: '180.00' },
-  'ourivesaria-lume': { item: 'Gold filigree earrings', amount: '650.00' },
-  'sapataria-gaivota': { item: 'Leather loafers', amount: '240.00' },
-};
 const DEMO_WINDOW_MS = 2 * 60_000;
 
 const STATUS: Record<ClaimStatus, { label: string; tone: string }> = {
@@ -52,7 +45,7 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
   const country = countryOf(shop.country);
   const cur = country.currency;
   const detected = detectCountry().code;
-  const sample = (id: string) => SAMPLE[id] ?? SAMPLE['loja-azul'];
+  const sample = (id: string) => catalogShop(id)?.sample ?? { item: '', amount: '' };
   const [lines, setLines] = useState<BasketLine[]>(() => [{ id: 1, ...sample(initialShop), rate: country.rates[0].rate, category: 'goods' }]);
   const [shortWindow, setShortWindow] = useState(false);
   const [engine, setEngine] = useState<'native' | 'trustless'>('native');
@@ -60,19 +53,21 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
   const [reclaiming, setReclaiming] = useState<string | null>(null);
   const [reclaimMsg, setReclaimMsg] = useState<{ text: string; tx?: string; error?: boolean } | null>(null);
   // Coming back to the till shows the sale still waiting for the traveller or customs.
+  const openShop = (id: string) => {
+    const next = s.shops.find((x) => x.id === id);
+    if (!next) return;
+    setShopId(id);
+    setCurrent(null);
+    setReclaimMsg(null);
+    setLines([{ id: 1, ...sample(id), rate: countryOf(next.country).rates[0].rate, category: 'goods' }]);
+  };
   const [current, setCurrent] = useState<Claim | null>(
     () => s.claims.find((c) => c.shopId === initialShop && c.status === 'locked' && !compact && Date.now() - c.createdAt < 30 * 60_000) ?? null,
   );
   const [locking, setLocking] = useState(false);
   const [failure, setFailure] = useState('');
 
-  // A new country brings its own rates and currency: the prices are cleared, to be typed again.
-  const prevCountry = useRef(country.code);
-  useEffect(() => {
-    if (prevCountry.current === country.code) return;
-    prevCountry.current = country.code;
-    setLines((ls) => ls.map((l) => ({ ...l, rate: country.rates[0].rate, amount: '' })));
-  }, [country.code, country.rates]);
+  // A new country opens its own demo shop: openShop() resets the till with that shop's rates and currency.
 
   const parsed = lines.map((l) => {
     const minor = parseAmount(l.amount);
@@ -129,18 +124,13 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
         <nav className="shop-switch" aria-label="Choose the shop">
           <span className="field__label">You are at the till of</span>
           <div className="shop-switch__options">
-            {s.shops.map((x) => (
+            {s.shops.filter((x) => x.country === shop.country).map((x) => (
               <button
                 key={x.id}
                 type="button"
                 className="shop-switch__option"
                 aria-pressed={x.id === shopId}
-                onClick={() => {
-                  setShopId(x.id);
-                  setCurrent(null);
-                  setReclaimMsg(null);
-                  setLines([{ id: 1, ...sample(x.id), rate: countryOf(x.country).rates[0].rate, category: 'goods' }]);
-                }}
+                onClick={() => openShop(x.id)}
               >
                 {x.name}
               </button>
@@ -166,8 +156,8 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
 
       {!compact && (
         <label className="field country">
-          <span className="field__label">Demo: apply another country’s tax-free rules to this till</span>
-          <select className="field__input" value={shop.country} onChange={(e) => ledger.setShopCountry(shopId, e.target.value)}>
+          <span className="field__label">Country of the shop: sets the tax-free rules, currency and demo shops</span>
+          <select className="field__input" value={shop.country} onChange={(e) => openShop(shopsOf(e.target.value)[0]?.id ?? shopId)}>
             {COUNTRIES.map((c) => (
               <option key={c.code} value={c.code}>
                 {c.name}, {c.currency}
@@ -175,7 +165,7 @@ export function ShopView({ initialShop = 'loja-azul', compact = false }: { initi
               </option>
             ))}
           </select>
-          <span className="field__hint">The demo shops are in Lisbon. Switching the country changes the rates, minimum, currency and export window, to show how Carimbo adapts.</span>
+          <span className="field__hint">Fictional demo shops. Every country has its own, with its own rates, minimum, currency and export window.</span>
           <RulesNote rules={rules} />
         </label>
       )}

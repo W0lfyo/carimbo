@@ -71,7 +71,7 @@ export function CustomsView({ compact = false }: { compact?: boolean }) {
         <header className="desk__head">
           <div className="stack-0">
             <h1 className="title">Customs desk</h1>
-            <span className="muted">Lisbon Airport, Terminal 1</span>
+            <span className="muted">{(() => { const c = countryOf(s.shops.find((x) => x.id === open[0]?.shopId)?.country ?? 'PT'); return `${c.name}, departures, ${c.airport}`; })()}</span>
           </div>
           <span className="chip">Officer 0482</span>
         </header>

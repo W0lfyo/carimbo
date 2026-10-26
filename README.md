@@ -91,7 +91,7 @@ Their Testnet API holds Circle's **USDC**, so on this path the VAT is escrowed i
 
 ### Testnet deployment
 
-All accounts are created and funded by `/#/setup`, and the result is committed as [`web/public/chain.json`](web/public/chain.json). The five shops are fictional Lisbon boutiques, each with its own Testnet account; shops added later are activated by *Activate the shops* on the same page.
+All accounts are created and funded by `/#/setup`, and the result is committed as [`web/public/chain.json`](web/public/chain.json). The demo shops are fictional (five in Lisbon, one to five per country elsewhere, 31 in all). The five Lisbon shops each have their own Testnet account, and the shops of other countries sign with those same accounts; shops added later are activated by *Activate the shops* on the same page.
 
 | Role | Account |
 |---|---|
